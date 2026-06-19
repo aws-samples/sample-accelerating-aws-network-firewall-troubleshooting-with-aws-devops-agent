@@ -1,0 +1,43 @@
+{
+  "name": "nf-devops-agent-incident-response",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deployable AWS Network Firewall sample environment for automating incident response with AWS DevOps Agent (AWS CDK / TypeScript).",
+  "license": "MIT-0",
+  "bin": {
+    "scenarioctl": "src/scenarioctl/cli.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "test": "jest",
+    "lint": "eslint . --ext .ts",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:cdk": "cdk deploy --all --require-approval never",
+    "destroy": "bash scripts/destroy.sh",
+    "destroy:cdk": "ts-node src/scenarioctl/cli.ts destroy",
+    "baseline": "ts-node src/scenarioctl/cli.ts baseline",
+    "scenario": "ts-node src/scenarioctl/cli.ts"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.150.0",
+    "constructs": "^10.3.0",
+    "@aws-sdk/client-ssm": "^3.620.0",
+    "@aws-sdk/client-cloudwatch": "^3.620.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.620.0",
+    "@aws-sdk/client-resource-groups-tagging-api": "^3.620.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.150.0",
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.0",
+    "fast-check": "^3.20.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0"
+  }
+}

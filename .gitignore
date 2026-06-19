@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+
+# CDK
+cdk.out/
+cdk.context.json
+.cdk.staging/
+
+# Generated scenario context (rendered by scenarioctl/context.ts)
+cdk.context.generated.json
+scenario-context.json
+
+# Local scenarioctl state file (authoritative active scenario + S4 timestamp)
+.scenarioctl-state.json
+
+# Status-page server is generated at synth time from buildStatusServer() into
+# the asset dir; nf_icons.py (the committed source) stays tracked.
+assets/status-page/statuspage.py
+assets/status-page/__pycache__/
+
+# Raw AWS Architecture Icon package (large, AWS-licensed asset pack). Only the
+# generated assets/status-page/nf_icons.py is needed at deploy time; regenerate
+# it with diagrams/gen_py_icons.sh after placing the package under diagrams/Icon-package.
+diagrams/Icon-package/
+
+# Same AWS-licensed icon pack staged under blog/ for diagram authoring. The
+# individual icons actually used are copied into blog/diagram-sources/icons/.
+blog/Icon-Package/
+blog/Icon-package/
+# Local diagram-preview artifacts.
+diagrams/preview.py
+diagrams/*.png
+
+# TypeScript build output
+dist/
+*.js
+*.d.ts
+*.js.map
+*.tsbuildinfo
+
+# Keep config JS that the toolchain needs
+!jest.config.js
+
+# Keep the webhook Lambda source (hand-authored JS, not build output)
+!src/webhook/index.js
+
+# Keep the blog diagram-source render scripts (hand-authored, not build output)
+!blog/diagram-sources/render.js
+!blog/diagram-sources/capture-arch.js
+
+# Test / coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Word/Office temporary lock files
+~$*
+
+# Clean export copies of the repo (generated for security scanning / publishing).
+GitHub-1/
+GitHub-S/
+
+# The blog is tracked in its own standalone repo at the top-level blog/ folder,
+# not inside the CDK project. Keep it out of this repo entirely.
+/blog/

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NF demo workload status</title>
+<style>
+  /* Mirrors the CSS served by lib/workload-stack.ts statuspage.py. */
+  body{font-family:system-ui,Arial,sans-serif;margin:0;background:#0f1b2d;color:#e9eef5}
+  .wrap{max-width:760px;margin:0 auto;padding:32px 20px}
+  h1{font-size:20px;font-weight:600;margin:0 0 4px}
+  .sub{color:#9fb0c3;font-size:13px;margin:0 0 24px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{border-radius:10px;padding:16px 18px;background:#16263c;border:1px solid #24364f}
+  .card h2{font-size:14px;margin:0 0 10px;font-weight:600}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .ok .dot{background:#2ecc71;box-shadow:0 0 8px #2ecc71} .ok{color:#9be9b8}
+  .bad .dot{background:#e74c3c;box-shadow:0 0 8px #e74c3c} .bad{color:#f5a8a0}
+  .metric{display:block;color:#7e91a8;font-size:11px;margin-top:8px;font-family:monospace}
+  .foot{color:#7e91a8;font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>AWS Network Firewall demo: workload status</h1>
+    <p class="sub">Firewall: nf-devops-agent &middot; updated 2026-06-05T07:01:54Z &middot; auto-refresh 10s</p>
+    <div class="grid">
+      <div class="card"><h2>Scenario 1: Domain deny list</h2>
+        <span class="badge ok"><span class="dot"></span>Healthy</span>
+        <span class="metric">DomainReachabilityFailures</span></div>
+      <div class="card"><h2>Scenario 2: Stateless rule priority</h2>
+        <span class="badge ok"><span class="dot"></span>Healthy</span>
+        <span class="metric">StatelessRuleFailures</span></div>
+      <div class="card"><h2>Scenario 3: Stream exception (asymmetric)</h2>
+        <span class="badge ok"><span class="dot"></span>Healthy</span>
+        <span class="metric">AsymmetricFlowFailures</span></div>
+      <div class="card"><h2>Scenario 4: Post-change regression</h2>
+        <span class="badge ok"><span class="dot"></span>Healthy</span>
+        <span class="metric">PostChangeRegressionFailures</span></div>
+    </div>
+    <p class="foot">Each card reflects the workload health check for one scenario.
+    Green = reachable, red = the firewall is dropping that scenario probe.</p>
+  </div>
+</body>
+</html>

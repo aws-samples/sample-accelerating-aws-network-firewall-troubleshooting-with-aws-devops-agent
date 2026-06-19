@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NF incident response pipeline</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+  .canvas { position: relative; width: 3190px; height: 620px; background: #ffffff; }
+
+  .node {
+    position: absolute; background: #ffffff; border: 1px solid #e3e8ef;
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 18px 14px;
+    transform: translateZ(0); backface-visibility: hidden; isolation: isolate;
+  }
+  .accent { position: absolute; top: 0; left: 0; right: 0; height: 5px;
+            background: var(--c); border-radius: 16px 16px 0 0; }
+  .icon { width: 44px; height: 44px; margin-bottom: 9px; transform: translateZ(0); }
+  .cat { font-size: 12.5px; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.03em; color: #5b6b7f; }
+  .title { font-size: 19px; font-weight: 700; color: #1e293b; margin-top: 2px; }
+  .sub { font-size: 13px; color: #3d4a5c; margin-top: 6px; line-height: 1.32; }
+
+  .handle { position: absolute; width: 11px; height: 11px; border-radius: 50%;
+            background: #fff; border: 2.5px solid var(--c); }
+  .handle.l { left: -6px; top: 50%; transform: translateY(-50%); }
+  .handle.r { right: -6px; top: 50%; transform: translateY(-50%); }
+  .handle.b { bottom: -6px; left: 50%; transform: translateX(-50%); }
+  .handle.t { top: -6px; left: 50%; transform: translateX(-50%); }
+
+  .label { position: absolute; display: flex; align-items: center; gap: 8px;
+           background: #fff; border: 1px solid #e3e8ef; border-radius: 999px;
+           padding: 6px 14px 6px 6px; box-shadow: 0 4px 10px rgba(15,23,42,0.08);
+           font-size: 15px; color: #415062; font-weight: 600; white-space: nowrap; }
+  .label .num { display: inline-flex; align-items: center; justify-content: center;
+                width: 26px; height: 26px; border-radius: 50%; background: var(--c);
+                color: #fff; font-size: 15px; font-weight: 800;
+                box-shadow: 0 2px 4px rgba(15,23,42,0.25); }
+
+  .heading { position: absolute; left: 40px; top: 10px; font-size: 16px; color: #5b6b7f; font-weight: 600; }
+  .legend { position: absolute; left: 40px; top: 34px; font-size: 13.5px; color: #8a97a8; }
+
+  svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .edge-path { fill: none; stroke: #d2dae4; stroke-width: 3; }
+  .edge-dash { stroke-dasharray: 7 6; }
+  #dots { visibility: hidden; will-change: transform; }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <svg class="edges" viewBox="0 0 3190 620">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+                markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#c2ccd9"></path>
+        </marker>
+      </defs>
+      <path id="e1" class="edge-path" d="M280,448 C370,448 370,148 450,148" marker-end="url(#arrow)"></path>
+      <path id="e2" class="edge-path" d="M690,148 C775,148 775,448 860,448" marker-end="url(#arrow)"></path>
+      <path id="e3" class="edge-path" d="M1100,448 C1185,448 1185,148 1270,148" marker-end="url(#arrow)"></path>
+      <path id="e4" class="edge-path" d="M1510,148 C1595,148 1595,448 1680,448" marker-end="url(#arrow)"></path>
+      <path id="e5" class="edge-path" d="M1920,448 C2005,448 2005,148 2090,148" marker-end="url(#arrow)"></path>
+      <path id="e6" class="edge-path edge-dash" d="M2210,228 L2210,356" marker-end="url(#arrow)"></path>
+      <path id="e7" class="edge-path" d="M2330,148 C2415,148 2415,448 2500,448" marker-end="url(#arrow)"></path>
+      <path id="e8" class="edge-path" d="M2740,448 C2825,448 2825,148 2910,148" marker-end="url(#arrow)"></path>
+      <g id="dots"></g>
+    </svg>
+
+    <div class="heading">AWS Network Firewall incident response with AWS DevOps Agent</div>
+    <div class="legend">From a firewall drop to a root cause and recommended fix: the full alarm pipeline.</div>
+
+    <!-- 1. Test workload (bottom) -->
+    <div class="node" style="left:40px; top:364px; width:240px; height:168px; --c:#ED7100;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNFRDcxMDAiLz48cmVjdCB4PSIxOCIgeT0iMTYiIHdpZHRoPSIyOCIgaGVpZ2h0PSIzMiIgcng9IjMiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGxpbmUgeDE9IjI0IiB5MT0iMjUiIHgyPSI0MCIgeTI9IjI1IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PGxpbmUgeDE9IjI0IiB5MT0iMzMiIHgyPSI0MCIgeTI9IjMzIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PGNpcmNsZSBjeD0iMjYiIGN5PSI0MSIgcj0iMi42IiBmaWxsPSIjZmZmIi8+PC9zdmc+" alt="Amazon EC2 Test workload icon">
+      <div class="cat">Amazon EC2</div><div class="title">Test workload</div>
+      <div class="sub">Health-check daemon + egress</div>
+      <div class="handle r"></div>
+    </div>
+
+    <!-- 2. Network Firewall (top) -->
+    <div class="node" style="left:450px; top:64px; width:240px; height:168px; --c:#DD344C;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNERDM0NEMiLz48ZyBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMi44IiBzdHJva2UtbGluZWNhcD0icm91bmQiPjxsaW5lIHgxPSIxNiIgeTE9IjIyIiB4Mj0iNDgiIHkyPSIyMiIvPjxsaW5lIHgxPSIxNiIgeTE9IjMyIiB4Mj0iNDgiIHkyPSIzMiIvPjxsaW5lIHgxPSIxNiIgeTE9IjQyIiB4Mj0iNDgiIHkyPSI0MiIvPjxsaW5lIHgxPSIyOCIgeTE9IjIyIiB4Mj0iMjgiIHkyPSIzMiIvPjxsaW5lIHgxPSI0MCIgeTE9IjIyIiB4Mj0iNDAiIHkyPSIzMiIvPjxsaW5lIHgxPSIyMiIgeTE9IjMyIiB4Mj0iMjIiIHkyPSI0MiIvPjxsaW5lIHgxPSIzNCIgeTE9IjMyIiB4Mj0iMzQiIHkyPSI0MiIvPjxsaW5lIHgxPSI0NiIgeTE9IjMyIiB4Mj0iNDYiIHkyPSI0MiIvPjwvZz48L3N2Zz4=" alt="AWS Network Firewall icon">
+      <div class="cat">Network Firewall</div><div class="title">Inspect egress</div>
+      <div class="sub">Drops or rejects traffic</div>
+      <div class="handle l"></div><div class="handle r"></div>
+    </div>
+
+    <!-- 3. CloudWatch logs + metrics (bottom) -->
+    <div class="node" style="left:860px; top:364px; width:240px; height:168px; --c:#E7157B;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNFNzE1N0IiLz48cmVjdCB4PSIxOSIgeT0iMTUiIHdpZHRoPSIyNiIgaGVpZ2h0PSIzNCIgcng9IjMiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGxpbmUgeDE9IjI1IiB5MT0iMjQiIHgyPSIzOSIgeTI9IjI0IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMi44IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48bGluZSB4MT0iMjUiIHkxPSIzMSIgeDI9IjM5IiB5Mj0iMzEiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIyNSIgeTE9IjM4IiB4Mj0iMzQiIHkyPSIzOCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+" alt="Amazon CloudWatch metrics and logs icon">
+      <div class="cat">Amazon CloudWatch</div><div class="title">Metrics + logs</div>
+      <div class="sub">Per-scenario metrics, ALERT/FLOW</div>
+      <div class="handle l"></div><div class="handle r"></div>
+    </div>
+
+    <!-- 4. Alarm (top) -->
+    <div class="node" style="left:1270px; top:64px; width:240px; height:168px; --c:#B0084D;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNFNzE1N0IiLz48Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIxNyIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiLz48cG9seWxpbmUgcG9pbnRzPSIyMiwzNSAyOCwyOSAzMywzNCA0MiwyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjwvc3ZnPg==" alt="Amazon CloudWatch alarm icon">
+      <div class="cat">CloudWatch alarm</div><div class="title">Per-scenario</div>
+      <div class="sub">Names the broken scenario</div>
+      <div class="handle l"></div><div class="handle r"></div>
+    </div>
+
+    <!-- 5. SNS (bottom) -->
+    <div class="node" style="left:1680px; top:364px; width:240px; height:168px; --c:#C925D1;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNFNzE1N0IiLz48Y2lyY2xlIGN4PSIyNCIgY3k9IjIyIiByPSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIvPjxjaXJjbGUgY3g9IjQyIiBjeT0iMjAiIHI9IjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGNpcmNsZSBjeD0iNDAiIGN5PSI0MiIgcj0iNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiLz48bGluZSB4MT0iMjgiIHkxPSIyNCIgeDI9IjM4IiB5Mj0iMjEiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjYiLz48bGluZSB4MT0iMjciIHkxPSIyNiIgeDI9IjM3IiB5Mj0iMzkiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjYiLz48L3N2Zz4=" alt="Amazon SNS topic icon">
+      <div class="cat">Amazon SNS</div><div class="title">Topic</div>
+      <div class="sub">Publishes on ALARM</div>
+      <div class="handle l"></div><div class="handle r"></div>
+    </div>
+
+    <!-- 6. Lambda bridge (top) -->
+    <div class="node" style="left:2090px; top:64px; width:240px; height:168px; --c:#ED7100;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNFRDcxMDAiLz48cGF0aCBkPSJNMjIgMTYgTDMxIDE2IEw0NiA0OCBMMzcgNDggWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMjggMzMgTDIyIDQ4IEwxNSA0OCBMMjQgMjggWiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==" alt="AWS Lambda webhook bridge icon">
+      <div class="cat">AWS Lambda</div><div class="title">Webhook bridge</div>
+      <div class="sub">Signs payload, POSTs webhook</div>
+      <div class="handle l"></div><div class="handle r"></div><div class="handle b"></div>
+    </div>
+
+    <!-- Secrets Manager (bottom, below Lambda) -->
+    <div class="node" style="left:2090px; top:364px; width:240px; height:168px; --c:#DD344C;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiNERDM0NEMiLz48cmVjdCB4PSIyMCIgeT0iMzAiIHdpZHRoPSIyNCIgaGVpZ2h0PSIxOCIgcng9IjMiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PHBhdGggZD0iTTI1IDMwIHYtNSBhNyA3IDAgMCAxIDE0IDAgdjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGNpcmNsZSBjeD0iMzIiIGN5PSIzOCIgcj0iMi44IiBmaWxsPSIjZmZmIi8+PGxpbmUgeDE9IjMyIiB5MT0iNDAiIHgyPSIzMiIgeTI9IjQ0IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+" alt="AWS Secrets Manager webhook credentials icon">
+      <div class="cat">Secrets Manager</div><div class="title">Webhook creds</div>
+      <div class="sub">URL + HMAC signing secret</div>
+      <div class="handle t"></div>
+    </div>
+
+    <!-- 7. DevOps Agent (bottom) -->
+    <div class="node" style="left:2500px; top:364px; width:240px; height:168px; --c:#01A88D;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiMwMUE4OEQiLz48cmVjdCB4PSIyMCIgeT0iMjQiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyMCIgcng9IjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGxpbmUgeDE9IjMyIiB5MT0iMTYiIHgyPSIzMiIgeTI9IjI0IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PGNpcmNsZSBjeD0iMzIiIGN5PSIxNCIgcj0iMi42IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMjciIGN5PSIzMyIgcj0iMi44IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMzciIGN5PSIzMyIgcj0iMi44IiBmaWxsPSIjZmZmIi8+PGxpbmUgeDE9IjI4IiB5MT0iNDQiIHgyPSIyOCIgeTI9IjQ4IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PGxpbmUgeDE9IjM2IiB5MT0iNDQiIHgyPSIzNiIgeTI9IjQ4IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+" alt="AWS DevOps Agent investigate icon">
+      <div class="cat">AWS DevOps Agent</div><div class="title">Investigate</div>
+      <div class="sub">Describe*/List* + read logs</div>
+      <div class="handle l"></div><div class="handle r"></div>
+    </div>
+
+    <!-- 8. Root cause + fix (top) -->
+    <div class="node" style="left:2910px; top:64px; width:240px; height:168px; --c:#7AA116;">
+      <div class="accent"></div>
+      <img class="icon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiM3QUExMTYiLz48Y2lyY2xlIGN4PSIyOSIgY3k9IjI5IiByPSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiLz48bGluZSB4MT0iMzgiIHkxPSIzOCIgeDI9IjQ3IiB5Mj0iNDciIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxwb2x5bGluZSBwb2ludHM9IjI0LDI5IDI4LDMzIDM1LDI1IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMi44IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" alt="Root cause and mitigation plan icon">
+      <div class="cat">Root cause</div><div class="title">+ mitigation plan</div>
+      <div class="sub">Ready-to-run fix</div>
+      <div class="handle l"></div>
+    </div>
+
+    <!-- Edge labels -->
+    <div class="label" style="left:300px; top:254px; --c:#ED7100;"><span class="num">1</span>Egress traffic</div>
+    <div class="label" style="left:706px; top:254px; --c:#DD344C;"><span class="num">2</span>Drops + logs</div>
+    <div class="label" style="left:1110px; top:254px; --c:#E7157B;"><span class="num">3</span>Scenario metric</div>
+    <div class="label" style="left:1518px; top:254px; --c:#B0084D;"><span class="num">4</span>Publish on ALARM</div>
+    <div class="label" style="left:1928px; top:254px; --c:#C925D1;"><span class="num">5</span>Invoke</div>
+    <div class="label" style="left:2236px; top:280px; --c:#ED7100;"><span class="num">6</span>Read creds</div>
+    <div class="label" style="left:2346px; top:254px; --c:#01A88D;"><span class="num">7</span>Signed POST</div>
+    <div class="label" style="left:2752px; top:254px; --c:#7AA116;"><span class="num">8</span>Root cause + fix</div>
+  </div>
+
+  <script>
+    var EDGES = [
+      { id: 'e1', color: '#ED7100' },
+      { id: 'e2', color: '#DD344C' },
+      { id: 'e3', color: '#E7157B' },
+      { id: 'e4', color: '#B0084D' },
+      { id: 'e5', color: '#C925D1' },
+      { id: 'e6', color: '#ED7100' },
+      { id: 'e7', color: '#01A88D' },
+      { id: 'e8', color: '#7AA116' }
+    ];
+    var CYCLE = 11.2; // seconds for one full pass
+
+    if (location.search.indexOf('static') === -1) {
+      var svgNS = 'http://www.w3.org/2000/svg';
+      var dots = document.getElementById('dots');
+      var n = EDGES.length;
+      var travel = 0.82 / n;
+
+      EDGES.forEach(function (e, i) {
+        var start = i / n;
+        var c = document.createElementNS(svgNS, 'circle');
+        c.setAttribute('r', '9');
+        c.setAttribute('fill', e.color);
+
+        var mo = document.createElementNS(svgNS, 'animateMotion');
+        mo.setAttribute('dur', CYCLE + 's');
+        mo.setAttribute('repeatCount', 'indefinite');
+        mo.setAttribute('keyPoints', '0;0;1;1');
+        mo.setAttribute('keyTimes', '0;' + start + ';' + (start + travel) + ';1');
+        mo.setAttribute('calcMode', 'linear');
+
+        var mp = document.createElementNS(svgNS, 'mpath');
+        mp.setAttribute('href', '#' + e.id);
+        mp.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '#' + e.id);
+        mo.appendChild(mp);
+
+        var op = document.createElementNS(svgNS, 'animate');
+        op.setAttribute('attributeName', 'opacity');
+        op.setAttribute('dur', CYCLE + 's');
+        op.setAttribute('repeatCount', 'indefinite');
+        op.setAttribute('keyTimes', '0;' + start + ';' + (start + 0.01) + ';' +
+          (start + travel - 0.01) + ';' + (start + travel) + ';1');
+        op.setAttribute('values', '0;0;1;1;0;0');
+
+        c.appendChild(mo);
+        c.appendChild(op);
+        dots.appendChild(c);
+      });
+
+      var imgs = [].slice.call(document.querySelectorAll('img.icon'));
+      Promise.all(imgs.map(function (im) {
+        return im.decode ? im.decode().catch(function(){}) : Promise.resolve();
+      })).then(function () {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () { dots.style.visibility = 'visible'; });
+        });
+      });
+    } else {
+      var d = document.getElementById('dots');
+      if (d) d.remove();
+    }
+  </script>
+</body>
+</html>

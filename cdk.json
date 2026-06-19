@@ -1,0 +1,29 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
+  "watch": {
+    "include": ["bin/**", "lib/**", "src/**"],
+    "exclude": ["node_modules", "cdk.out", "dist", "test"]
+  },
+  "context": {
+    "awsRegion": "us-east-1",
+    "activeScenario": "none",
+    "allowPriority": 100,
+    "dropPriority": 200,
+    "streamExceptionPolicy": "CONTINUE",
+    "asymmetricRoute": false,
+    "domainDenyActive": false,
+    "logDestination": "cloudwatch",
+    "notificationEmail": "",
+    "saasTestDomain": "docs.aws.amazon.com",
+    "domainTargetUrl": "",
+    "statelessTargetUrl": "",
+    "asymmetricTargetUrl": "",
+    "controlTargetUrl": "",
+    "statusPageAllowedCidr": "0.0.0.0/0",
+    "statusPageUsername": "admin",
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-ec2:launchTemplateDefaultUserData": true,
+    "@aws-cdk/core:newStyleStackSynthesis": true
+  }
+}
