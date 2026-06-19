@@ -14,7 +14,7 @@
     "domainDenyActive": false,
     "logDestination": "cloudwatch",
     "notificationEmail": "",
-    "saasTestDomain": "docs.aws.amazon.com",
+    "saasTestDomain": "",
     "domainTargetUrl": "",
     "statelessTargetUrl": "",
     "asymmetricTargetUrl": "",

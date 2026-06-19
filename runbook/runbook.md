@@ -28,14 +28,19 @@ account/region):
 | Status page (public ALB) | `StatusPageUrl` output (HTTP :80) |
 | Project tag (teardown sweep) | `Project = nf-devops-agent` |
 
-Scenario-specific targets. These are **intentional references to real AWS service
-endpoints** used as functional test targets (not example placeholders); the scenarios
-require reachable, resolvable endpoints to demonstrate a real firewall drop (see
-`SECURITY.md`):
+Scenario-specific targets. All probes hit a **self-deployed test endpoint**
+(`NfTestEndpointStack`): a second, isolated VPC with two internet-facing Network
+Load Balancers and a single target instance. The targets are the deploy-generated
+NLB DNS names, so nothing is hardcoded and the demo runs against live, self-owned
+URLs (see `SECURITY.md`):
 
-- SaaS test domain (Scenario 1): `saasTestDomain` context value, default `docs.aws.amazon.com` (an intentional real AWS endpoint).
-- Stateless test traffic class (Scenario 2): TCP destination port `9142` (probed against `cassandra.<region>.amazonaws.com:9142`, the regional Amazon Keyspaces (for Apache Cassandra) TLS endpoint, via a TCP connect — an intentional real AWS service endpoint).
-- Control probe (status page only, not a scenario): `https://sts.amazonaws.com`, an intentional real AWS endpoint no scenario rule targets, used to detect a subnet-wide egress outage (Scenario 3 scope) versus an isolated per-scenario rule failure. Publishes no metric and raises no alarm.
+- SaaS test domain (Scenario 1): `saasTestDomain` context value, default the app endpoint's generated NLB DNS name. The firewall SNI deny rule matches this same host.
+- Stateless test traffic class (Scenario 2): TCP destination port `9142` (probed against the app endpoint's NLB DNS name on `:9142`, via a TCP connect — the endpoint listens on 9142).
+- Control probe (status page only, not a scenario): `https://<control endpoint NLB DNS>`, a separate endpoint no scenario rule targets, used to detect a subnet-wide egress outage (Scenario 3 scope) versus an isolated per-scenario rule failure. Publishes no metric and raises no alarm.
+
+The probes use `curl -k` (the endpoint serves a self-signed certificate) and send
+a shared-secret header; the target instance's security group allows ingress only
+from the deployment's two NAT gateway Elastic IPs (no `0.0.0.0/0`).
 
 ## Command reference
 
@@ -140,8 +145,8 @@ a fix by hand on the agent's advice). The page reads the **live Amazon CloudWatc
 works even when a scenario drops all firewall egress) and the ALB health-checks the server
 at `/healthz`.
 
-The daemon also runs a page-only **control probe** against an AWS endpoint no scenario
-rule targets (`https://sts.amazonaws.com`), so the page can tell an isolated rule failure
+The daemon also runs a page-only **control probe** against the separate control
+endpoint no scenario rule targets, so the page can tell an isolated rule failure
 apart from a subnet-wide egress outage. For Scenarios 1 and 2 the control probe stays
 green and only the affected card turns red. For Scenario 3 the route change takes the
 whole egress path down, so the control probe also fails: the page then shows a
@@ -206,7 +211,7 @@ the investigation/fix the agent produces is documented per scenario.
 npm run scenario activate 1
 ```
 
-This adds the designated SaaS domain (`saasTestDomain`, default `docs.aws.amazon.com`) to the
+This adds the designated SaaS domain (`saasTestDomain`, default the test endpoint's app NLB DNS name) to the
 `rg-domain` Suricata domain rule group as a `drop` rule that matches on the TLS SNI.
 
 **Manual alternative (console):**
@@ -216,7 +221,7 @@ This adds the designated SaaS domain (`saasTestDomain`, default `docs.aws.amazon
 3. Choose **Edit**.
 4. Add a `drop` rule for the SaaS domain.
 5. Configure the rule to match on the TLS SNI using Suricata syntax: `drop tls $HOME_NET any -> $EXTERNAL_NET any (tls.sni; content:"..."; ...)`.
-6. For the `content` value, use the domain from the `saasTestDomain` context value (default `docs.aws.amazon.com`, the intentional real test domain; see `SECURITY.md`).
+6. For the `content` value, use the domain from the `saasTestDomain` context value (default the test endpoint's app NLB DNS name; see `SECURITY.md`).
 7. Save the changes.
 
 Either way, the firewall's native `DroppedPackets` metric rises above its baseline and the
@@ -284,7 +289,7 @@ Either way, the `StatelessRuleFailures` health check begins failing and the
 ### Trigger and verification
 
 A TCP connect to the designated stateless test class target (TCP port `9142`, probed against
-`cassandra.<region>.amazonaws.com:9142`) is dropped because the drop rule, now at the lower priority
+the test endpoint's app NLB DNS name on `:9142`) is dropped because the drop rule, now at the lower priority
 value, is evaluated first. The activation verification confirms the blocked egress and an
 increase in `DroppedPackets` within 5 minutes.
 

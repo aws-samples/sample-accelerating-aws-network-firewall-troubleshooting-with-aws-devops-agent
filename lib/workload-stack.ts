@@ -64,6 +64,7 @@ import { Construct } from "constructs";
 
 /** Re-export the project tag from the network stack's single source of truth. */
 import { PROJECT_TAG_KEY, PROJECT_TAG_VALUE } from "./network-stack";
+import { PROBE_SECRET_NAME } from "./test-endpoint-stack";
 
 /** The custom CloudWatch namespace the health-check daemon publishes to. */
 export const WORKLOAD_METRIC_NAMESPACE = "NfAgent/Workload";
@@ -131,40 +132,23 @@ export const SCENARIO_ALARM_NAMES = {
  * failure, which is why Scenario 1's target must be a real, resolvable domain.
  */
 const DEFAULTS = {
-  // NOTE: the probe targets below are INTENTIONAL references to real AWS service
-  // endpoints, not example placeholders. The scenarios demonstrate a real
-  // firewall drop, so each target must be reachable and resolvable at baseline
-  // and only break when its scenario is activated. Documented in SECURITY.md.
+  // These are FALLBACK placeholders only. In a real deploy, bin/app.ts always
+  // supplies the probe targets from the self-deployed test endpoint's generated
+  // NLB DNS names (NfTestEndpointStack), so these defaults are never used at
+  // deploy time. They use RFC-2606 example domains (never real endpoints) so no
+  // real domain is hardcoded; if used standalone they simply will not resolve.
+  /** Scenario 1 fallback (overridden by app.ts with the test endpoint URL). */
+  domainTargetUrl: "https://app.example.com",
   /**
-   * Scenario 1: the SaaS domain on 443. `bin/app.ts` overrides this with
-   * `https://<saasTestDomain>` so the probe always hits the SAME domain the
-   * firewall denylist blocks. Must be real and resolvable (default `docs.aws.amazon.com`).
-   */
-  domainTargetUrl: "https://docs.aws.amazon.com",
-  /**
-   * Scenario 2: the designated stateless test class — TCP port 9142 (Amazon
-   * Keyspaces over TLS). The probe opens a TCP connection to the regional
-   * Amazon Keyspaces (for Apache Cassandra) endpoint
-   * (`cassandra.<region>.amazonaws.com:9142`), a public AWS service endpoint
-   * that answers on 9142 over TLS, so the check is green at baseline and flips
-   * red only when the stateless priority inversion drops port-9142 egress.
-   * Empty by default so the builder fills in the deploy region; override with a
-   * `host:port` value (a TCP connect, not an HTTP request) to use another target.
+   * Scenario 2 fallback (overridden by app.ts with `<test endpoint>:9142`).
+   * Empty so the builder fills in an example host; format is `host:port` (a TCP
+   * connect, not HTTP).
    */
   statelessTargetUrl: "",
-  /** Scenario 3: a real, reachable HTTPS endpoint whose mid-flow packets the asymmetric drop breaks. */
-  asymmetricTargetUrl: "https://aws.amazon.com",
-  /**
-   * Control probe: a real, reachable HTTPS endpoint that is NOT the target of
-   * any scenario rule. It measures the health of the egress PATH itself, so the
-   * status page can tell an isolated rule failure (Scenarios 1/2, control still
-   * green) apart from a subnet-wide egress outage (Scenario 3 flips the whole
-   * protected-subnet route cross-AZ, so the control probe fails too). When the
-   * control probe is failing, the page explains the other reds as collateral of
-   * the routing fault rather than their own conditions firing. Page-only: it is
-   * NOT published as a CloudWatch metric, so it adds no alarm.
-   */
-  controlTargetUrl: "https://sts.amazonaws.com",
+  /** Scenario 3 fallback (overridden by app.ts with the test endpoint URL). */
+  asymmetricTargetUrl: "https://app.example.com",
+  /** Control-probe fallback (overridden by app.ts with the control endpoint URL). */
+  controlTargetUrl: "https://control.example.com",
 } as const;
 
 /** How often the health-check daemon probes each target, in seconds. */
@@ -190,6 +174,12 @@ export interface WorkloadStackProps extends cdk.StackProps {
   readonly asymmetricTargetUrl?: string;
   /** Override the control probe target (default an AWS HTTPS endpoint not used by any scenario). */
   readonly controlTargetUrl?: string;
+  /**
+   * Name of the Secrets Manager secret holding the probe shared-secret (header
+   * `X-Probe-Secret`). The daemon fetches it at runtime; defaults to the
+   * test-endpoint stack's secret name.
+   */
+  readonly probeSecretName?: string;
   /**
    * Basic-auth username for the status page + webhook-config UI (default
    * {@link DEFAULT_STATUS_PAGE_USERNAME}). The page and the config form are
@@ -315,6 +305,23 @@ export class WorkloadStack extends cdk.Stack {
     );
     // The status server reads the generated login password from its secret at boot.
     this.statusPageSecret.grantRead(this.instanceRole);
+    // The health-check daemon reads the probe shared-secret (test-endpoint stack)
+    // at runtime. Scope to that one secret by name (+ the 6-char SM suffix).
+    this.instanceRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "ReadProbeSecret",
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [
+          cdk.Stack.of(this).formatArn({
+            service: "secretsmanager",
+            resource: "secret",
+            arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+            resourceName: `${PROBE_SECRET_NAME}-*`,
+          }),
+        ],
+      }),
+    );
 
     // Egress-only security group (SSM 443 to the interface endpoints + probe
     // egress through the firewall); NO inbound rules.
@@ -389,14 +396,15 @@ export class WorkloadStack extends cdk.Stack {
     const alarm3 = SCENARIO_ALARM_NAMES.scenario3;
 
     const domainUrl = props.domainTargetUrl ?? DEFAULTS.domainTargetUrl;
-    // Scenario 2 default: the regional Amazon Keyspaces TLS endpoint (port 9142),
-    // a public AWS service endpoint. Region-aware so it tracks the deploy region.
+    // Scenario 2 fallback if not supplied by app.ts: an example host:port (TCP
+    // connect on 9142). In a real deploy app.ts passes `<test endpoint>:9142`.
     const statelessUrl =
       props.statelessTargetUrl ||
       DEFAULTS.statelessTargetUrl ||
-      `cassandra.${region}.amazonaws.com:9142`;
+      "db.example.com:9142";
     const asymmetricUrl = props.asymmetricTargetUrl ?? DEFAULTS.asymmetricTargetUrl;
     const controlUrl = props.controlTargetUrl ?? DEFAULTS.controlTargetUrl;
+    const probeSecretName = props.probeSecretName ?? "nf-devops-agent-probe-secret";
 
     // The health-check script. Each cycle it runs the per-scenario egress probes
     // (publishing the custom metrics that drive the alarms) and the page-only
@@ -417,6 +425,11 @@ export class WorkloadStack extends cdk.Stack {
       `STATELESS_URL="${statelessUrl}"`,
       `ASYMMETRIC_URL="${asymmetricUrl}"`,
       `CONTROL_URL="${controlUrl}"`,
+      `PROBE_SECRET_NAME="${probeSecretName}"`,
+      // Fetch the probe shared-secret from Secrets Manager at startup (generated
+      // at deploy, never hardcoded). Over the CloudWatch/SM interface path so it
+      // works regardless of firewall egress state. Empty until readable.
+      'PROBE_SECRET="$(aws secretsmanager get-secret-value --secret-id "$PROBE_SECRET_NAME" --region "$REGION" --query SecretString --output text 2>/dev/null || true)"',
       `ALARM1="${alarm1}"`,
       `ALARM2="${alarm2}"`,
       `ALARM3="${alarm3}"`,
@@ -437,7 +450,7 @@ export class WorkloadStack extends cdk.Stack {
       "# alarm evaluates; the PAGE state is read back from the alarm (read_alarm_states).",
       "probe() {",
       "  # $1 = metric name, $2 = url.",
-      '  curl -sS -o /dev/null --max-time "$TIMEOUT" "$2" >/dev/null 2>&1',
+      '  curl -sS -k -H "X-Probe-Secret: $PROBE_SECRET" -o /dev/null --max-time "$TIMEOUT" "$2" >/dev/null 2>&1',
       "  code=$?",
       '  if [ "$code" -eq 28 ]; then RESULT=1; else RESULT=0; fi',
       '  put_metric "$1" "$RESULT"',
@@ -464,7 +477,7 @@ export class WorkloadStack extends cdk.Stack {
       "# so the page can tell an isolated rule failure from a subnet-wide outage.",
       "probe_control() {",
       "  # $1 = url. Sets RESULT to 1 on a firewall-drop timeout, else 0.",
-      '  curl -sS -o /dev/null --max-time "$TIMEOUT" "$1" >/dev/null 2>&1',
+      '  curl -sS -k -H "X-Probe-Secret: $PROBE_SECRET" -o /dev/null --max-time "$TIMEOUT" "$1" >/dev/null 2>&1',
       "  code=$?",
       '  if [ "$code" -eq 28 ]; then RESULT=1; else RESULT=0; fi',
       "}",
@@ -709,6 +722,27 @@ except Exception:
     ICON_EC2 = ICON_NFW = ICON_S3 = ICON_ELB = ICON_INET = ICON_NAT = ICON_CF = ""
     ICON_IGW = ICON_CW = ICON_SNS = ICON_LAMBDA = ICON_AGENT = ICON_AWS = ICON_KEYSPACES = ""
 
+def _white_icon(data_uri):
+    # Build a white-tinted copy of a base64 SVG data URI so the icon is legible
+    # on the dark endpoint card. Decodes the SVG, forces strokes/fills to white,
+    # and re-encodes. Falls back to the original on any error.
+    try:
+        head, b64 = data_uri.split(",", 1)
+        svg = base64.b64decode(b64).decode("utf-8")
+        # Force every explicit fill/stroke colour to white, and set a default
+        # fill on the root <svg> so currentColor/none paths render white too.
+        import re as _re
+        svg = _re.sub(r'fill="(?!none)[^"]*"', 'fill="#ffffff"', svg)
+        svg = _re.sub(r'stroke="(?!none)[^"]*"', 'stroke="#ffffff"', svg)
+        svg = svg.replace("<svg ", '<svg fill="#ffffff" ', 1)
+        return head + "," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    except Exception:
+        return data_uri
+
+# A white version of the generic internet/web-endpoint icon (legible on the
+# dark status card).
+ICON_INET_WHITE = _white_icon(ICON_INET) if ICON_INET else ""
+
 CSS = (
     "*{box-sizing:border-box}"
     "html,body{height:100%}"
@@ -793,21 +827,18 @@ T_LINE = "#2c4a6a"
 def leg_color(s, control_failing):
     sid = str(s.get("id"))
     failing = bool(s.get("failing"))
-    # Subnet-wide egress outage (control probe down) = the Scenario 3 blast
-    # radius. The control probe is a live probe with NO alarm lag, so drive this
-    # mode off it directly and ignore per-alarm transition ordering (alarm 3 can
-    # reach ALARM a cycle after alarms 1 and 2). Scenario 3 is the root cause
-    # (red); 1 and 2 are collateral (amber).
     if control_failing:
         return T_RED if sid == "3" else T_AMBER
     if not failing:
         return T_GREEN
     return T_RED
 
-def _card(cx, cy, icon, title, sub, accent, icon_px=46):
+def _card(cx, cy, icon, title, sub, accent, icon_px=46, label_dy=0):
     # An icon-only rounded card with a colored status ring, and the label BELOW
     # the card (so long hostnames are never clipped by the card width). (cx, cy)
-    # is the card CENTER.
+    # is the card CENTER. label_dy pushes the label further down (used for nodes
+    # whose bottom edge has a connector arc routed beneath them, so the arc never
+    # crosses the label text).
     cw = icon_px + 30
     ch = icon_px + 30
     x, y = cx - cw / 2.0, cy - ch / 2.0
@@ -817,10 +848,28 @@ def _card(cx, cy, icon, title, sub, accent, icon_px=46):
         'fill="#0f1f35" stroke="' + accent + '" stroke-width="1.6"/>',
         '<image href="' + icon + '" x="' + f"{cx - icon_px / 2.0:.0f}" + '" y="' + f"{iy:.0f}" + '" width="' + str(icon_px) + '" height="' + str(icon_px) + '"/>',
         # label below the card
-        '<text x="' + f"{cx:.0f}" + '" y="' + f"{y + ch + 16:.0f}" + '" text-anchor="middle" class="ttl">' + title + '</text>',
+        '<text x="' + f"{cx:.0f}" + '" y="' + f"{y + ch + 16 + label_dy:.0f}" + '" text-anchor="middle" class="ttl">' + title + '</text>',
     ]
     if sub:
-        parts.append('<text x="' + f"{cx:.0f}" + '" y="' + f"{y + ch + 29:.0f}" + '" text-anchor="middle" class="sub2">' + sub + '</text>')
+        parts.append('<text x="' + f"{cx:.0f}" + '" y="' + f"{y + ch + 29 + label_dy:.0f}" + '" text-anchor="middle" class="sub2">' + sub + '</text>')
+    return "".join(parts)
+
+def _card_labeled(cx, cy, icon, title, sub, accent, icon_px=34, box_w=150, box_h=104):
+    # A rounded card with the icon AND the title/sub INSIDE the box (icon on top,
+    # text below it). Used for endpoints whose top/bottom edges have connector
+    # arcs: with the text inside, the box edges are clean and the lines can flow
+    # straight off them without ever crossing label text. (cx, cy) is the CENTER.
+    x, y = cx - box_w / 2.0, cy - box_h / 2.0
+    iy = y + 14
+    ty = iy + icon_px + 18
+    parts = [
+        '<rect x="' + f"{x:.0f}" + '" y="' + f"{y:.0f}" + '" width="' + f"{box_w:.0f}" + '" height="' + f"{box_h:.0f}" + '" rx="15" '
+        'fill="#0f1f35" stroke="' + accent + '" stroke-width="1.6"/>',
+        '<image href="' + icon + '" x="' + f"{cx - icon_px / 2.0:.0f}" + '" y="' + f"{iy:.0f}" + '" width="' + str(icon_px) + '" height="' + str(icon_px) + '"/>',
+        '<text x="' + f"{cx:.0f}" + '" y="' + f"{ty:.0f}" + '" text-anchor="middle" class="ttl">' + title + '</text>',
+    ]
+    if sub:
+        parts.append('<text x="' + f"{cx:.0f}" + '" y="' + f"{ty + 14:.0f}" + '" text-anchor="middle" class="sub2">' + sub + '</text>')
     return "".join(parts)
 
 def _curve(x1, y1, x2, y2, color, eid):
@@ -863,9 +912,12 @@ def _pill(cx, cy, text, color):
 
 def _arrowmarker(color):
     cid = 'arrow-' + color.lstrip('#')
-    return ('<marker id="' + cid + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
-            'markerHeight="7" orient="auto-start-reverse">'
-            '<path d="M0,0 L10,5 L0,10 z" fill="' + color + '"/></marker>')
+    # Fixed-size arrowhead (userSpaceOnUse). refX=0 puts the triangle's BASE at
+    # the path end, so the whole arrowhead sits PAST the line (it starts where
+    # the line finishes) instead of overlapping the stroke.
+    return ('<marker id="' + cid + '" viewBox="0 0 10 10" refX="0" refY="5" '
+            'markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto">'
+            '<path d="M0,1 L9,5 L0,9 z" fill="' + color + '"/></marker>')
 
 def _grouplabel(x, y, label, cidr, color):
     out = ('<text x="' + str(x) + '" y="' + str(y) + '" class="grp" fill="' + color + '">' + label + '</text>')
@@ -885,24 +937,33 @@ def topology(scenarios, control_failing):
     s3 = by_id.get("3", {"id": 3})
     c1, c2, c3 = leg_color(s1, control_failing), leg_color(s2, control_failing), leg_color(s3, control_failing)
     any_failing = any(bool(x.get("failing")) for x in (s1, s2, s3))
-    # The trunk (workload -> firewall -> NAT -> IGW) is the shared egress PATH.
-    # It breaks (red) only under a subnet-wide routing fault (Scenario 3).
     trunk = T_RED if control_failing else T_GREEN
     fw_accent = T_RED if control_failing else "#4aa3ff"
-    # Pipeline accent: lit (amber) while any alarm is firing, idle otherwise.
     pipe = T_AMBER if any_failing else T_IDLE
 
-    W, H = 980, 620
+    W, H = 1030, 620
     # ---- DATA PLANE (top) ----
     vpc_y, vpc_h = 52, 300
     dataMidY = vpc_y + vpc_h / 2.0    # 202
     midY = int(dataMidY)
-    wlX, fwX, natX, igwX = 120, 332, 540, 690
-    tgtX = 884
-    tgtY = [int(dataMidY - 112), int(dataMidY), int(dataMidY + 112)]
+    wlX, fwX, natX = 120, 332, 540
+    # IGW sits just to the right of the VPC box (which ends at x=652): its LEFT
+    # edge meets the VPC edge without overlapping the firewall/public boxes.
+    igwX = 712
+    tgtX = 936
+    tgtYc = int(dataMidY)             # single endpoint node, vertically centered
     half = 38
-    thalf = 33
-    igwHalf = 30
+    # Labeled cards (text inside). The IGW box is narrower (short label); the
+    # endpoint is a touch wider (longer label). Both are 104h (half-height 52).
+    igwHW = 58
+    boxHW = 78
+    boxHH = 52
+    thalf = boxHH
+    igwHalf = boxHH
+    # Generic endpoint label. The node represents "a web server reached over the
+    # internet" — we deliberately do NOT show the auto-generated load-balancer
+    # DNS name (it would leak the infrastructure type), just a generic endpoint.
+    target_label = "Web endpoint"
 
     used = set([trunk, fw_accent, c1, c2, c3, pipe])
     markers = "".join(_arrowmarker(c) for c in used)
@@ -922,7 +983,7 @@ def topology(scenarios, control_failing):
     svg.append(_grouplabel(sb_x[1] + 14, sb_y + 22, "FIREWALL SUBNET", "10.0.2.0/24", "#ff9d66"))
     svg.append(_groupbox(sb_x[2], sb_y, sb_w, sb_h, "#bf8cff"))
     svg.append(_grouplabel(sb_x[2] + 14, sb_y + 22, "PUBLIC SUBNET", "10.0.0.0/24", "#cda3ff"))
-    svg.append('<text x="' + str(tgtX) + '" y="' + str(vpc_y + 22) + '" text-anchor="middle" class="grp" fill="#8298b3">INTERNET</text>')
+    svg.append('<text x="843" y="' + str(vpc_y + 8) + '" text-anchor="middle" class="grp" fill="#8298b3">INTERNET</text>')
 
     # ---- Trunk edges: workload -> firewall -> NAT -> IGW ----
     flow = []
@@ -930,20 +991,52 @@ def topology(scenarios, control_failing):
     svg.append(_pill((wlX + fwX) / 2.0, midY - 28, "inspect", trunk))
     svg.append(_curve(fwX + half, midY, natX - half, midY, trunk, "e_t2"))
     svg.append(_pill((fwX + natX) / 2.0, midY - 28, "egress", trunk))
-    svg.append(_curve(natX + half, midY, igwX - igwHalf, midY, trunk, "e_t3"))
+    svg.append(_curve(natX + half, midY, igwX - igwHW, midY, trunk, "e_t3"))
     if trunk == T_GREEN:
         flow.append(_flowdot("e_t1", T_GREEN, "2.6s", "0s"))
         flow.append(_flowdot("e_t2", T_GREEN, "2.6s", "0.5s"))
         flow.append(_flowdot("e_t3", T_GREEN, "2.6s", "1.0s"))
 
-    # ---- internet gateway -> three targets (the per-scenario legs) ----
-    legs = [(tgtY[0], c1, "HTTPS", 0.45, "e_l1"), (tgtY[1], c2, "TLS", 0.5, "e_l2"), (tgtY[2], c3, "HTTPS", 0.55, "e_l3")]
-    for ty, color, lbl, t, eid in legs:
-        x1, x2 = igwX + igwHalf, tgtX - thalf
-        svg.append(_curve(x1, midY, x2, ty, color, eid))
-        px = x1 + (x2 - x1) * t
-        py = midY + (ty - midY) * t
-        svg.append(_pill(px, py, lbl, color))
+    # ---- internet gateway -> the single web endpoint (three legs) ----
+    #   leg 1: TOP edge of IGW   -> TOP edge of endpoint    (bows up, arrow points DOWN)
+    #   leg 2: RIGHT edge of IGW -> LEFT edge of endpoint    (straight across, arrow RIGHT)
+    #   leg 3: just below the node labels (bows down, arrow points UP)
+    # Each leg approaches its target PERPENDICULARLY. The arrowhead marker has its
+    # base at the path end (refX=0), so the line ends at the edge and the head
+    # sits just past it — no overlap, no big gap.
+    igwTopX, igwTopY = igwX, midY - boxHH
+    igwBotX, igwBotY = igwX, midY + boxHH
+    igwRightX, igwRightY = igwX + igwHW, midY
+    epTopX, epTopY = tgtX, tgtYc - boxHH
+    epBotX, epBotY = tgtX, tgtYc + boxHH
+    epLeftX, epLeftY = tgtX - boxHW, tgtYc
+    bow = 56          # top leg upward bow
+    botBow = 30       # bottom leg downward bow (shallow; labels pushed below it)
+    ah = 9            # arrowhead length, so the path stops where the head begins
+    leg_defs = [
+        # leg 1: top-center edge -> top-center edge (arrow lands centered, points down)
+        ("e_l1", c1, "HTTPS :443",
+         "M%.0f,%.0f C%.0f,%.0f %.0f,%.0f %.0f,%.0f" % (
+             igwTopX, igwTopY, igwTopX, igwTopY - bow, epTopX, epTopY - bow, epTopX, epTopY - ah),
+         (igwTopX + epTopX) / 2.0, igwTopY - bow - 2),
+        # leg 2: right edge -> left edge (straight across, arrow lands centered on left edge)
+        ("e_l2", c2, "TLS :9142",
+         "M%.0f,%.0f C%.0f,%.0f %.0f,%.0f %.0f,%.0f" % (
+             igwRightX, igwRightY, (igwRightX + epLeftX) / 2.0, igwRightY,
+             (igwRightX + epLeftX) / 2.0, epLeftY, epLeftX - ah, epLeftY),
+         (igwRightX + epLeftX) / 2.0, midY - 14),
+        # leg 3: bottom-center edge -> bottom-center edge (arrow lands centered, points up).
+        # The two node labels are pushed BELOW this shallow arc (label_dy), so the
+        # line runs between the box bottom and the text, never over the words.
+        ("e_l3", c3, "HTTPS :443",
+         "M%.0f,%.0f C%.0f,%.0f %.0f,%.0f %.0f,%.0f" % (
+             igwBotX, igwBotY, igwBotX, igwBotY + botBow, epBotX, epBotY + botBow, epBotX, epBotY + ah),
+         (igwBotX + epBotX) / 2.0, igwBotY + botBow + 6),
+    ]
+    for eid, color, lbl, d, lx, ly in leg_defs:
+        svg.append('<path id="' + eid + '" d="' + d + '" fill="none" stroke="' + color + '" '
+                   'stroke-width="3" stroke-linecap="butt" marker-end="url(#arrow-' + color.lstrip('#') + ')"/>')
+        svg.append(_pill(lx, ly, lbl, color))
         if color == T_GREEN:
             flow.append(_flowdot(eid, T_GREEN, "2.6s", "1.4s"))
 
@@ -956,10 +1049,13 @@ def topology(scenarios, control_failing):
     # centered on the line, like a swimlane label, instead of floating above it.
     svg.append('<text x="26" y="' + str(pipeY) + '" transform="rotate(-90 26 ' + str(pipeY) + ')" '
                'text-anchor="middle" class="grp" fill="#8298b3">ALARM PIPELINE</text>')
-    # EC2 -> CloudWatch (metrics), vertical drop from the workload node.
-    svg.append(_curve(wlX, midY + half, cwX, pipeY - 40, pipe, "e_m1"))
+    # EC2 -> CloudWatch (metrics), vertical drop from the workload node. Start the
+    # line BELOW the node's two-line label (card bottom + label height) so it does
+    # not cross the "Workload / Amazon EC2" text.
+    metricsTop = midY + half + 38
+    svg.append(_curve(wlX, metricsTop, cwX, pipeY - 40, pipe, "e_m1"))
     # Center the label on the vertical line (wlX == cwX), at the line's midpoint.
-    svg.append(_pill((wlX + cwX) / 2.0, (midY + half + pipeY - 40) / 2.0, "metrics", pipe))
+    svg.append(_pill((wlX + cwX) / 2.0, (metricsTop + pipeY - 40) / 2.0, "metrics", pipe))
     # CloudWatch -> SNS -> Lambda -> DevOps Agent
     svg.append(_curve(cwX + 40, pipeY, snsX - 40, pipeY, pipe, "e_p1"))
     svg.append(_pill((cwX + snsX) / 2.0, pipeY - 26, "alarm", pipe))
@@ -981,10 +1077,17 @@ def topology(scenarios, control_failing):
     svg.append(_card(wlX, midY, ICON_EC2, "Workload", "Amazon EC2", trunk))
     svg.append(_card(fwX, midY, ICON_NFW, "Network Firewall", "policy + rules", fw_accent))
     svg.append(_card(natX, midY, ICON_NAT, "NAT gateway", "egress", trunk))
-    svg.append(_card(igwX, midY, ICON_IGW, "Internet", "gateway", trunk, icon_px=34))
-    svg.append(_card(tgtX, tgtY[0], ICON_AWS, "docs.aws.amazon.com", "HTTPS :443", c1, icon_px=34))
-    svg.append(_card(tgtX, tgtY[1], ICON_KEYSPACES, "Amazon Keyspaces", "TLS :9142", c2, icon_px=34))
-    svg.append(_card(tgtX, tgtY[2], ICON_AWS, "aws.amazon.com", "HTTPS :443", c3, icon_px=34))
+    svg.append(_card_labeled(igwX, midY, ICON_IGW, "Internet", "gateway", trunk, icon_px=34, box_w=igwHW * 2))
+    # Single internet web endpoint that all three legs reach. Its ring reflects
+    # the worst leg state (red if any leg is the dropped root cause, else amber
+    # if any is collateral, else green). The label is the auto-generated URL.
+    if T_RED in (c1, c2, c3):
+        ep_accent = T_RED
+    elif T_AMBER in (c1, c2, c3):
+        ep_accent = T_AMBER
+    else:
+        ep_accent = T_GREEN
+    svg.append(_card_labeled(tgtX, tgtYc, ICON_INET_WHITE, target_label, "over the internet", ep_accent, icon_px=36, box_w=boxHW * 2))
 
     # ---- Pipeline nodes ----
     svg.append(_card(cwX, pipeY, ICON_CW, "CloudWatch", "alarm", pipe, icon_px=40))

@@ -368,9 +368,20 @@ function assertShellSafe(label: string, value: string): void {
  * Build the bounded `curl` command. Writes the HTTP status code to stdout and
  * suppresses the body, capped by `--max-time`. The URL is single-quoted (and
  * validated by {@link assertShellSafe}) to avoid shell injection.
+ *
+ * `-k` allows the self-signed certificate the test endpoint serves (the probe
+ * only measures connect success vs a firewall-drop timeout, not cert validity).
+ * If `NF_PROBE_SECRET` is set, it is sent as the `X-Probe-Secret` header so the
+ * endpoint's shared-secret gate is satisfied; there is NO hardcoded fallback, so
+ * nothing predictable ships in the code. The header is optional for correctness:
+ * the probe classifies any completed connection as egress-succeeded, so even
+ * without the header a reachable endpoint returns a response (HTTP 403) rather
+ * than a firewall-drop timeout.
  */
 function buildCurlCommand(targetUrl: string, maxTimeSeconds: number): string {
-  return `curl -sS -o /dev/null -w "%{http_code}" --max-time ${maxTimeSeconds} '${targetUrl}'`;
+  const secret = process.env.NF_PROBE_SECRET;
+  const hdr = secret ? `-H 'X-Probe-Secret: ${secret}' ` : "";
+  return `curl -sS -k ${hdr}-o /dev/null -w "%{http_code}" --max-time ${maxTimeSeconds} '${targetUrl}'`;
 }
 
 /**

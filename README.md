@@ -28,14 +28,15 @@ All defaults live in the `context` block of `cdk.json` and can be overridden wit
 | Context value | Default | Purpose |
 |---|---|---|
 | `awsRegion` | `us-east-1` | Single region the app deploys into (resolved into the CDK `env`). |
-| `saasTestDomain` | `docs.aws.amazon.com` | Scenario 1 SaaS endpoint added to the domain denylist. Set to a domain the workload can actually reach for a live test. |
+| `saasTestDomain` | _(empty)_ | Scenario 1 SaaS endpoint added to the domain denylist. Defaults to the test endpoint's generated app NLB DNS name (see below); set to override with your own reachable domain. |
 | `notificationEmail` | _(empty)_ | Optional address for the SNS email subscription on alarm notifications. |
 | `devopsAgentPrincipal` | _(account-root placeholder)_ | The AWS DevOps Agent trust principal (Agent Space role/principal ARN, or the agent service principal). Set to the real principal for a production deployment. |
 | `logDestination` | `cloudwatch` | Active log destination, `cloudwatch` or `s3`. |
-| `domainTargetUrl` | `https://<saasTestDomain>` | Scenario 1 health-check probe URL. Defaults to the same domain the firewall denies, so the check is green at baseline and red once the scenario is activated. |
-| `statelessTargetUrl` | `cassandra.<region>.amazonaws.com:9142` | Scenario 2 probe target (TCP port 9142 test class). Defaults to the regional Amazon Keyspaces (for Apache Cassandra) TLS endpoint, a public AWS service endpoint that answers on 9142, so the check is green at baseline and red once the stateless priorities are inverted. Format is `host:port` (a TCP connect, not HTTP). |
-| `asymmetricTargetUrl` | `https://aws.amazon.com` | Scenario 3 probe URL, a real, reachable HTTPS endpoint. |
-| `controlTargetUrl` | `https://sts.amazonaws.com` | Status-page control probe (no metric, no alarm). An AWS endpoint no scenario rule targets, used to detect a subnet-wide egress outage (Scenario 3) versus an isolated rule failure. |
+| `domainTargetUrl` | _(test endpoint)_ | Scenario 1 health-check probe URL. Defaults to `https://<app endpoint NLB DNS>`, the same host the firewall denies, so the check is green at baseline and red once the scenario is activated. |
+| `statelessTargetUrl` | _(test endpoint)_ | Scenario 2 probe target (TCP port 9142 test class). Defaults to `<app endpoint NLB DNS>:9142`, which the test endpoint answers on, so the check is green at baseline and red once the stateless priorities are inverted. Format is `host:port` (a TCP connect, not HTTP). |
+| `asymmetricTargetUrl` | _(test endpoint)_ | Scenario 3 probe URL. Defaults to `https://<app endpoint NLB DNS>`, a reachable HTTPS endpoint. |
+| `controlTargetUrl` | _(test endpoint)_ | Status-page control probe (no metric, no alarm). Defaults to `https://<control endpoint NLB DNS>`, a separate endpoint no scenario rule targets, used to detect a subnet-wide egress outage (Scenario 3) versus an isolated rule failure. |
+| `probeSecret` | _(generated default)_ | Shared secret the HTTPS probes send to the test endpoint (`X-Probe-Secret` header) as defence in depth on top of the NAT-EIP-scoped security group. |
 | `statusPageAllowedCidr` | `0.0.0.0/0` | CIDR allowed to reach the public status-page ALB on HTTP :80. Defaults to open; for anything beyond a short-lived environment, lock it to a specific IP or range. |
 | `statusPageUsername` | `admin` | Basic-auth username for the status page + webhook-config UI. The password is always generated into AWS Secrets Manager at deploy and printed by `scripts/deploy.sh`. |
 
@@ -43,9 +44,9 @@ All defaults live in the `context` block of `cdk.json` and can be overridden wit
 
 The workload runs a health-check daemon that probes one target per scenario and publishes a custom CloudWatch metric per check (this is what gives each scenario its own alarm). A probe counts as **failed only on a connection timeout (curl exit 28)**, the signature of a firewall drop, so the target must be reachable at baseline and only break when you activate the scenario.
 
-- **All three scenarios work out of the box.** Scenario 1 probes `https://<saasTestDomain>` (default `https://docs.aws.amazon.com`), Scenario 2 opens a TCP connection to the regional Amazon Keyspaces (for Apache Cassandra) TLS endpoint (`cassandra.<region>.amazonaws.com:9142`), and Scenario 3 probes `https://aws.amazon.com`. All three targets are reachable AWS endpoints at baseline, so every scenario demonstrates the full green→red→fix loop with no override.
+- **All three scenarios work out of the box against a self-deployed test endpoint.** The CDK app provisions `NfTestEndpointStack` — a separate, isolated VPC with two internet-facing Network Load Balancers and a single target instance — so the probes hit live, self-owned URLs generated at deploy time (no external/real domains). Scenario 1 probes `https://<app endpoint NLB DNS>`, Scenario 2 opens a TCP connection to `<app endpoint NLB DNS>:9142`, and Scenario 3 probes `https://<app endpoint NLB DNS>`. All are reachable at baseline, so every scenario demonstrates the full green→red→fix loop with no override. Because the targets are the deploy-generated NLB DNS names (CloudFormation tokens), nothing is hardcoded.
 - Each probe targets a **distinct endpoint and port** so the three checks stay isolated. Scenario 2 uses port 9142 (rather than 443) so inverting the stateless priorities drops only its traffic class while Scenarios 1 and 3 stay green. Isolation is by port, not destination IP, so the endpoint's IP can change without breaking the rule. Override any target via `--context statelessTargetUrl=...` (or `domainTargetUrl` / `asymmetricTargetUrl`) to use different reachable endpoints.
-- A fourth **control probe** (`controlTargetUrl`, default `https://sts.amazonaws.com`) targets an AWS endpoint that no scenario rule touches. It is page-only (no metric, no alarm) and measures the egress path itself. Scenario 3 flips the whole protected-subnet route cross-AZ, so it takes all egress down and the control probe fails too. The status page uses this to show a subnet-wide-outage banner and mark the Scenario 1 and 2 cards as collateral (amber `UNREACHABLE`) rather than implying their own conditions fired, while all three alarms fire for the agent to correlate.
+- A fourth **control probe** (`controlTargetUrl`, default `https://<control endpoint NLB DNS>`) targets the test endpoint's separate control NLB that no scenario rule touches. It is page-only (no metric, no alarm) and measures the egress path itself. Scenario 3 flips the whole protected-subnet route cross-AZ, so it takes all egress down and the control probe fails too. The status page uses this to show a subnet-wide-outage banner and mark the Scenario 1 and 2 cards as collateral (amber `UNREACHABLE`) rather than implying their own conditions fired, while all three alarms fire for the agent to correlate.
 
 ## Quick start
 
@@ -53,7 +54,7 @@ The workload runs a health-check daemon that probes one target per scenario and 
 bash scripts/deploy.sh           # prereq check + bootstrap + deploy all stacks (clean baseline)
 ```
 
-`scripts/deploy.sh` checks prerequisites (Node 18+, npm, AWS CLI, credentials), installs dependencies, compiles and tests, bootstraps CDK if needed, deploys all nine stacks at the clean baseline, and prints the outputs and next steps. Re-running it is safe (CDK only changes what drifted). Pass `--skip-tests` to skip the local test run.
+`scripts/deploy.sh` checks prerequisites (Node 18+, npm, AWS CLI, credentials), installs dependencies, compiles and tests, bootstraps CDK if needed, deploys all ten stacks at the clean baseline, and prints the outputs and next steps. Re-running it is safe (CDK only changes what drifted). Pass `--skip-tests` to skip the local test run.
 
 Then drive the scenarios one at a time (only one scenario can be active at a time). AWS CloudShell is the easiest place to run these. Two options:
 
@@ -95,7 +96,7 @@ npm run lint                     # eslint . --ext .ts
 
 ## What gets deployed
 
-The app provisions nine stacks, wired together by cross-stack references so the deploy and teardown order falls out of the dependency graph:
+The app provisions ten stacks, wired together by cross-stack references so the deploy and teardown order falls out of the dependency graph:
 
 | Stack | Contents |
 |---|---|
@@ -164,4 +165,4 @@ See `runbook/runbook.md` ("Wiring AWS DevOps Agent to the alarm pipeline") for t
 
 ## Conclusion
 
-This sample provides reproducible AWS Network Firewall incident-response scenarios investigated by AWS DevOps Agent using native AWS APIs only. The workflow is intentionally stand-up-and-tear-down: deploy all nine stacks at a clean baseline, run one break-fix scenario at a time, let the agent investigate and recommend a fix, then destroy the environment the same day to control the AWS Network Firewall and NAT gateway hourly cost. Deploy the sample to experience agent-driven firewall troubleshooting end to end, from a tripped Amazon CloudWatch alarm through to a ready-to-run mitigation.
+This sample provides reproducible AWS Network Firewall incident-response scenarios investigated by AWS DevOps Agent using native AWS APIs only. The workflow is intentionally stand-up-and-tear-down: deploy all ten stacks at a clean baseline, run one break-fix scenario at a time, let the agent investigate and recommend a fix, then destroy the environment the same day to control the AWS Network Firewall and NAT gateway hourly cost. Deploy the sample to experience agent-driven firewall troubleshooting end to end, from a tripped Amazon CloudWatch alarm through to a ready-to-run mitigation.

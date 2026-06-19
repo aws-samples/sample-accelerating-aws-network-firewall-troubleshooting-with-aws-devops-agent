@@ -93,18 +93,31 @@ export interface AgentIamStackProps extends cdk.StackProps {
 }
 
 /**
+ * External ID required on the placeholder trust policy. When no real DevOps
+ * Agent principal is configured, the role trusts the account root BUT only with
+ * this `sts:ExternalId` condition, so the placeholder role cannot be assumed by
+ * an arbitrary in-account principal without it. The operator replaces the whole
+ * trust principal with the real Agent Space principal for production.
+ */
+export const PLACEHOLDER_TRUST_EXTERNAL_ID = "nf-devops-agent-placeholder-trust";
+
+/**
  * Resolve the trust principal for the role. A value that looks like a service
  * principal (`*.amazonaws.com`, no `arn:`) becomes an `iam.ServicePrincipal`; a
  * value starting with `arn:` becomes an `iam.ArnPrincipal`; an empty/absent
- * value becomes the placeholder `iam.AccountRootPrincipal` so the stack always
- * synthesizes with a valid trust policy.
+ * value becomes the placeholder account root CONSTRAINED by an `sts:ExternalId`
+ * condition so the stack synthesizes with a valid, non-open trust policy.
  */
 function resolveTrustPrincipal(value: string | undefined): iam.IPrincipal {
   const trimmed = (value ?? "").trim();
   if (trimmed === "") {
-    // Documented placeholder: keeps the trust policy valid for synth/deploy.
-    // The operator overrides this with the real Agent Space principal.
-    return new iam.AccountRootPrincipal();
+    // Documented placeholder: keeps the trust policy valid for synth/deploy, but
+    // requires sts:ExternalId so it is NOT assumable by any in-account principal
+    // without the external id. The operator overrides this with the real Agent
+    // Space principal (which replaces this placeholder entirely).
+    return new iam.PrincipalWithConditions(new iam.AccountRootPrincipal(), {
+      StringEquals: { "sts:ExternalId": PLACEHOLDER_TRUST_EXTERNAL_ID },
+    });
   }
   if (trimmed.startsWith("arn:")) {
     return new iam.ArnPrincipal(trimmed);

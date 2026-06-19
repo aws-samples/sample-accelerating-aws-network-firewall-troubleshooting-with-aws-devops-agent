@@ -16,8 +16,10 @@
 #   AWS_REGION=us-west-2 ./nf-scenario.sh activate 1
 #
 # Scenarios:
-#   1  Domain deny list   - add docs.aws.amazon.com to the rg-domain TLS-SNI denylist
+#   1  Domain deny list   - add the test endpoint's app NLB DNS name to the
+#                           rg-domain TLS-SNI denylist
 #   2  Stateless priority - invert the rg-stateless-priority allow/drop priorities
+#                           (drops TCP 9142 to the test endpoint)
 #   3  Asymmetric routing  - flip protected-subnet A egress to the other AZ's
 #                           firewall endpoint and move the return route, so a
 #                           flow's SYN and its return traverse different endpoints
@@ -27,10 +29,6 @@ set -euo pipefail
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 FW_NAME="nf-devops-agent"
 POLICY_NAME="nf-devops-agent-policy"
-# Intentional real AWS endpoint (not an example placeholder): Scenario 1 needs a
-# reachable, resolvable domain that only drops once the firewall denies it. The
-# SNI drop rule below must match whatever this resolves to. See SECURITY.md.
-SAAS_DOMAIN="${SAAS_DOMAIN:-docs.aws.amazon.com}"
 PROJECT_TAG="nf-devops-agent"
 
 BOLD=$(printf '\033[1m'); GRN=$(printf '\033[32m'); YLW=$(printf '\033[33m')
@@ -42,6 +40,20 @@ die()  { printf "%s✗ %s%s\n" "$RED" "$*" "$RST" >&2; exit 1; }
 
 aws --version >/dev/null 2>&1 || die "AWS CLI not found."
 AWS="aws --region $REGION"
+
+# Scenario 1 SNI target. By default, discover the test endpoint's app NLB DNS
+# name from the NfTestEndpointStack output so the deny rule matches exactly what
+# the probe hits (no hardcoded domain). Override with SAAS_DOMAIN=... if needed.
+if [ -z "${SAAS_DOMAIN:-}" ]; then
+  SAAS_DOMAIN="$($AWS cloudformation describe-stacks \
+    --stack-name NfTestEndpointStack \
+    --query "Stacks[0].Outputs[?OutputKey=='AppEndpointDns'||OutputKey=='AppEndpointDnsOut'].OutputValue | [0]" \
+    --output text 2>/dev/null || true)"
+fi
+[ -z "${SAAS_DOMAIN:-}" ] || [ "$SAAS_DOMAIN" = "None" ] && SAAS_DOMAIN="${SAAS_DOMAIN:-}"
+if [ -z "${SAAS_DOMAIN:-}" ] || [ "$SAAS_DOMAIN" = "None" ]; then
+  die "Could not resolve the test endpoint DNS (NfTestEndpointStack AppEndpointDns). Set SAAS_DOMAIN=... explicitly."
+fi
 
 # --- shared discovery -------------------------------------------------------
 get_update_token() { $AWS network-firewall describe-firewall --firewall-name "$FW_NAME" --query 'UpdateToken' --output text; }
@@ -66,9 +78,12 @@ S1_PLACEHOLDER='drop tls $HOME_NET any -> $EXTERNAL_NET any (ssl_state:client_he
 drop http $HOME_NET any -> $EXTERNAL_NET any (http.host; content:"blocked.placeholder.invalid"; startswith; endswith; msg:"S1 domain denylist HTTP (placeholder)"; flow:to_server, established; sid:2000011; rev:1;)'
 
 s1_rules_with_domain() {
+  # Suricata normalizes http.host to lowercase, so the http.host content MUST be
+  # lowercase (NLB DNS names contain uppercase). The TLS SNI rule uses nocase.
+  local saas_lc; saas_lc=$(printf '%s' "$SAAS_DOMAIN" | tr '[:upper:]' '[:lower:]')
   cat <<EOF
 drop tls \$HOME_NET any -> \$EXTERNAL_NET any (ssl_state:client_hello; tls.sni; content:"$SAAS_DOMAIN"; startswith; nocase; endswith; msg:"S1 domain denylist (SaaS domain)"; flow:to_server, established; sid:2000002; rev:1;)
-drop http \$HOME_NET any -> \$EXTERNAL_NET any (http.host; content:"$SAAS_DOMAIN"; startswith; endswith; msg:"S1 domain denylist HTTP (SaaS domain)"; flow:to_server, established; sid:2000012; rev:1;)
+drop http \$HOME_NET any -> \$EXTERNAL_NET any (http.host; content:"$saas_lc"; startswith; endswith; msg:"S1 domain denylist HTTP (SaaS domain)"; flow:to_server, established; sid:2000012; rev:1;)
 $S1_PLACEHOLDER
 EOF
 }

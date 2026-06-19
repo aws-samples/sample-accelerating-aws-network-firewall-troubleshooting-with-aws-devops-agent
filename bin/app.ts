@@ -35,6 +35,7 @@
 import * as cdk from "aws-cdk-lib";
 
 import { NetworkStack } from "../lib/network-stack";
+import { TestEndpointStack } from "../lib/test-endpoint-stack";
 import { FirewallStack } from "../lib/firewall-stack";
 import { LoggingStack } from "../lib/logging-stack";
 import { AlarmsStack } from "../lib/alarms-stack";
@@ -119,14 +120,16 @@ const scenarioContext = resolveScenarioContext(app);
 const awsRegion = readStringContext(app, "awsRegion", DEFAULT_AWS_REGION);
 const notificationEmail = readStringContext(app, "notificationEmail", "");
 
-// Health-check probe targets. Scenario 1 derives from `saasTestDomain` so the
-// probe always hits the SAME domain the firewall denylist blocks; the others can
-// be overridden via context to point at endpoints reachable from this account.
-// The default `docs.aws.amazon.com` is an INTENTIONAL real AWS endpoint (not an
-// example placeholder): the scenario needs a reachable, resolvable domain that
-// only drops once the firewall denies it. See SECURITY.md.
-const saasTestDomain = readStringContext(app, "saasTestDomain", "docs.aws.amazon.com");
-const domainTargetUrl = readStringContext(app, "domainTargetUrl", `https://${saasTestDomain}`);
+// Health-check probe targets. By default they point at the self-deployed test
+// endpoint (NfTestEndpointStack) — deploy-generated NLB DNS names, so NO real
+// external domain is referenced anywhere. Each can still be overridden via
+// context to point at a different reachable endpoint.
+//
+// The Scenario 1 firewall SNI deny rule matches the SAME app-endpoint DNS name
+// the probe hits, so a denied SNI drops the probe exactly as before — the agent
+// still discovers the dropped host in the alert log + rg-domain rule.
+const saasTestDomainOverride = readStringContext(app, "saasTestDomain", "");
+const domainTargetUrl = readStringContext(app, "domainTargetUrl", "");
 const statelessTargetUrl = readStringContext(app, "statelessTargetUrl", "");
 const asymmetricTargetUrl = readStringContext(app, "asymmetricTargetUrl", "");
 const controlTargetUrl = readStringContext(app, "controlTargetUrl", "");
@@ -152,6 +155,26 @@ const env: cdk.Environment = {
 // 1. Network — the Sample_VPC and routing fabric (no upstream dependency).
 const network = new NetworkStack(app, "NfNetworkStack", { env, scenarioContext });
 
+// 1b. Test endpoint — a SECOND, isolated VPC with internet-facing NLBs and a
+//     single target instance, so the scenario probes hit self-owned, deploy-
+//     generated URLs instead of real external domains. Its target SG is scoped
+//     to the main VPC's NAT EIPs (no 0.0.0.0/0). The firewall SNI rule and the
+//     workload probes reference its NLB DNS names (tokens) — nothing hardcoded.
+const testEndpoint = new TestEndpointStack(app, "NfTestEndpointStack", {
+  env,
+  natEipAddresses: network.natEipAddresses,
+});
+
+// Effective probe targets + Scenario 1 SNI domain, derived from the test
+// endpoint's generated NLB DNS names unless explicitly overridden via context.
+const appDns = testEndpoint.appEndpointDns;
+const controlDns = testEndpoint.controlEndpointDns;
+const effectiveSaasTestDomain = saasTestDomainOverride || appDns;
+const effectiveDomainTargetUrl = domainTargetUrl || `https://${appDns}`;
+const effectiveStatelessTargetUrl = statelessTargetUrl || `${appDns}:9142`;
+const effectiveAsymmetricTargetUrl = asymmetricTargetUrl || `https://${appDns}`;
+const effectiveControlTargetUrl = controlTargetUrl || `https://${controlDns}`;
+
 // 2. Firewall — NF + policy + rule groups; wires the firewall-endpoint routes.
 const firewall = new FirewallStack(app, "NfFirewallStack", {
   env,
@@ -161,6 +184,7 @@ const firewall = new FirewallStack(app, "NfFirewallStack", {
   protectedSubnetRouting: network.protectedSubnetRouting,
   publicSubnetReturnRouting: network.publicSubnetReturnRouting,
   ingressEdgeRouteTableId: network.ingressEdgeRouteTableId,
+  saasTestDomain: effectiveSaasTestDomain,
 });
 
 // 3. Logging — ALERT/FLOW log groups + Amazon Simple Storage Service (Amazon S3) bucket + logging configuration.
@@ -196,12 +220,13 @@ const workload = new WorkloadStack(app, "NfWorkloadStack", {
   vpc: network.vpc,
   protectedSubnet: network.protectedSubnets[0],
   firewallName: firewall.firewallName,
-  // Scenario 1 probes the same domain the firewall denylist blocks. The others
-  // fall back to the stack defaults unless overridden via context.
-  domainTargetUrl,
-  ...(statelessTargetUrl ? { statelessTargetUrl } : {}),
-  ...(asymmetricTargetUrl ? { asymmetricTargetUrl } : {}),
-  ...(controlTargetUrl ? { controlTargetUrl } : {}),
+  // Scenario probes target the self-deployed test endpoint's generated NLB DNS
+  // names (no hardcoded domains). Scenario 1 probes the same host the firewall
+  // denylist blocks.
+  domainTargetUrl: effectiveDomainTargetUrl,
+  statelessTargetUrl: effectiveStatelessTargetUrl,
+  asymmetricTargetUrl: effectiveAsymmetricTargetUrl,
+  controlTargetUrl: effectiveControlTargetUrl,
   statusPageUsername,
 });
 
@@ -338,4 +363,14 @@ new cdk.CfnOutput(scenarioScript, "ScenarioScriptS3Uri", {
 new cdk.CfnOutput(scenarioScript, "ScenarioScriptDownload", {
   value: scenarioScript.downloadCommand,
   description: "Copy-paste command to fetch the scenario driver in AWS CloudShell",
+});
+
+// Test-endpoint stack outputs: the generated NLB DNS names the scenarios probe.
+new cdk.CfnOutput(testEndpoint, "AppEndpointDnsOut", {
+  value: testEndpoint.appEndpointDns,
+  description: "Test endpoint (app) NLB DNS name — Scenario 1/2/3 probe target",
+});
+new cdk.CfnOutput(testEndpoint, "ControlEndpointDnsOut", {
+  value: testEndpoint.controlEndpointDns,
+  description: "Test endpoint (control) NLB DNS name — page-only control probe target",
 });

@@ -222,6 +222,13 @@ export class NetworkStack extends cdk.Stack {
   public readonly publicSubnetReturnRouting: PublicSubnetReturnRouting[];
   /** The SSM interface endpoints (so traffic bypasses the firewall). */
   public readonly ssmEndpoints: ec2.InterfaceVpcEndpoint[];
+  /**
+   * The public IP addresses of the two NAT gateways (one per AZ). All workload
+   * egress to the internet leaves via these EIPs, so a downstream
+   * internet-facing test endpoint can scope its security-group ingress to
+   * exactly these /32 addresses (no `0.0.0.0/0`).
+   */
+  public readonly natEipAddresses: string[];
 
   constructor(scope: Construct, id: string, props?: NetworkStackProps) {
     super(scope, id, props);
@@ -234,6 +241,19 @@ export class NetworkStack extends cdk.Stack {
 
     const maxAzs = props?.maxAzs ?? DEFAULT_MAX_AZS;
 
+    // Allocate explicit Elastic IPs for the NAT gateways (one per AZ) so their
+    // public addresses are known at synth and can be referenced by a downstream
+    // internet-facing test endpoint to lock its ingress to exactly the
+    // solution's egress IPs. Without this the L2 VPC auto-creates anonymous NAT
+    // EIPs whose addresses are not exposed as construct properties.
+    const natEips = Array.from({ length: maxAzs }, (_, i) =>
+      new ec2.CfnEIP(this, `NatGatewayEip${i}`, {
+        domain: "vpc",
+        tags: [{ key: "Name", value: `${id}/NatGatewayEip${i}` }],
+      }),
+    );
+    this.natEipAddresses = natEips.map((e) => e.attrPublicIp);
+
     // L2 VPC with three subnet tiers. The tier subnet TYPES give us most of the
     // baseline routing for free:
     //   PUBLIC               -> 0.0.0.0/0 to the IGW, and hosts the NAT gateways
@@ -244,6 +264,13 @@ export class NetworkStack extends cdk.Stack {
       ipAddresses: ec2.IpAddresses.cidr(props?.vpcCidr ?? DEFAULT_VPC_CIDR),
       maxAzs: maxAzs,
       natGateways: maxAzs, // one NAT gateway per AZ (lives in the public subnets)
+      // Use the explicit EIPs allocated above so the NAT public IPs are known at
+      // synth (a downstream internet-facing test endpoint scopes its ingress to
+      // exactly these addresses). The provider assigns EIPs to NAT gateways in
+      // AZ order, matching natEipAddresses[i].
+      natGatewayProvider: ec2.NatProvider.gateway({
+        eipAllocationIds: natEips.map((e) => e.attrAllocationId),
+      }),
       // NAT gateways must land in the PUBLIC tier (which carries the firewall
       // return route), NOT the out-of-band ALB tier.
       natGatewaySubnets: { subnetGroupName: PUBLIC_SUBNET_GROUP },

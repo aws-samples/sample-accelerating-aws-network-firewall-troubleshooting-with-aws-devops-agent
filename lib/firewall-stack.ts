@@ -65,24 +65,23 @@ const RG_STATEFUL_BASELINE_NAME = "rg-stateful-baseline";
 const RG_DOMAIN_NAME = "rg-domain";
 
 /**
- * Default SaaS test domain when none is supplied via context (cdk.json overrides).
- * INTENTIONAL real AWS endpoint (not an example placeholder): Scenario 1 needs a
- * reachable, resolvable domain that is healthy at baseline and only drops once
- * the firewall denylist is applied. Documented in SECURITY.md.
+ * Default SaaS test domain — a FALLBACK placeholder only. In a real deploy,
+ * bin/app.ts always passes the self-deployed test endpoint's generated NLB DNS
+ * name as `saasTestDomain`, so this default is never used at deploy time. It is
+ * an RFC-2606 example domain (never a real endpoint).
  */
-const DEFAULT_SAAS_TEST_DOMAIN = "docs.aws.amazon.com";
+const DEFAULT_SAAS_TEST_DOMAIN = "app.example.com";
 
 /**
  * Designated STATELESS test traffic class (Scenario 2). TCP destination port 9142
- * (Amazon Keyspaces over TLS) so this class never overlaps Scenario 1's or
- * Scenario 3's HTTPS domain traffic (443) — the single-scenario invariant means
- * each scenario owns a distinct manifestation. The egress probe (task 14) opens a
- * TCP connection to this port against the regional Amazon Keyspaces (for Apache
- * Cassandra) endpoint (`cassandra.<region>.amazonaws.com`), a public AWS service
- * endpoint that answers on 9142 over TLS at baseline. Nothing else in this sample
- * egresses on port 9142, so the `0.0.0.0/0` destination cleanly scopes this one
- * class WITHOUT pinning a destination IP — isolation comes from the unique port,
- * so a regional-endpoint IP change never breaks it.
+ * so this class never overlaps Scenario 1's or Scenario 3's HTTPS domain traffic
+ * (443) — the single-scenario invariant means each scenario owns a distinct
+ * manifestation. The egress probe opens a TCP connection to this port against the
+ * self-deployed test endpoint (the app NLB listens on 9142), so the check is
+ * green at baseline and only drops when the stateless priorities are inverted.
+ * Nothing else in this sample egresses on port 9142, so the `0.0.0.0/0`
+ * destination cleanly scopes this one class WITHOUT pinning a destination IP —
+ * isolation comes from the unique port, so an endpoint IP change never breaks it.
  */
 const STATELESS_TEST_DEST_CIDR = "0.0.0.0/0";
 const STATELESS_TEST_DEST_PORT = 9142;
@@ -128,6 +127,13 @@ export interface FirewallStackProps extends cdk.StackProps {
   readonly publicSubnetReturnRouting: PublicSubnetReturnRouting[];
   /** IGW edge (ingress) route table id (from `network.ingressEdgeRouteTableId`). */
   readonly ingressEdgeRouteTableId: string;
+  /**
+   * Scenario 1 SaaS test domain — the value matched by the SNI/Host deny rule.
+   * Passed from the app (the test endpoint's generated NLB DNS name by default,
+   * or a `saasTestDomain` context override). Falls back to context/constant when
+   * the stack is synthesized standalone.
+   */
+  readonly saasTestDomain?: string;
   /** Resolved scenario context (from `state.ts` `toContext`). Optional — falls back to CDK context. */
   readonly scenarioContext?: ScenarioContext;
 }
@@ -198,9 +204,13 @@ export class FirewallStack extends cdk.Stack {
       false,
     );
 
-    // saasTestDomain is deployment config (not part of ScenarioContext) — read from context.
+    // saasTestDomain is deployment config (not part of ScenarioContext). Prefer
+    // the prop (the test endpoint's generated DNS name from the app), then a
+    // context override, then the constant for standalone synth.
     const saasTestDomain: string =
-      this.node.tryGetContext("saasTestDomain") ?? DEFAULT_SAAS_TEST_DOMAIN;
+      props.saasTestDomain ||
+      this.node.tryGetContext("saasTestDomain") ||
+      DEFAULT_SAAS_TEST_DOMAIN;
 
     // Note: `asymmetricRoute` (Scenario 3) is already baked into the network
     // stack's `protectedSubnetRouting[i].firewallEndpointAz`, so this stack only
@@ -279,7 +289,10 @@ export class FirewallStack extends cdk.Stack {
       label: string,
     ): string[] => [
       `drop tls $HOME_NET any -> $EXTERNAL_NET any (ssl_state:client_hello; tls.sni; content:"${domain}"; startswith; nocase; endswith; msg:"S1 domain denylist (${label})"; flow:to_server, established; sid:${tlsSid}; rev:1;)`,
-      `drop http $HOME_NET any -> $EXTERNAL_NET any (http.host; content:"${domain}"; startswith; endswith; msg:"S1 domain denylist HTTP (${label})"; flow:to_server, established; sid:${httpSid}; rev:1;)`,
+      // Suricata normalizes the http.host buffer to lowercase, so the content
+      // pattern MUST be lowercase (an uppercase pattern is rejected at rule
+      // load). NLB DNS names contain uppercase, so lowercase the host match.
+      `drop http $HOME_NET any -> $EXTERNAL_NET any (http.host; content:"${domain.toLowerCase()}"; startswith; endswith; msg:"S1 domain denylist HTTP (${label})"; flow:to_server, established; sid:${httpSid}; rev:1;)`,
     ];
     // Placeholder rules always present (keeps the group valid + permissive).
     const placeholderRules = domainDropRules(PLACEHOLDER_BLOCKED_DOMAIN, 2000001, 2000011, "placeholder");
@@ -331,6 +344,19 @@ export class FirewallStack extends cdk.Stack {
 
     // ── CfnFirewall (one endpoint per firewall subnet, in AZ order) ──
     const firewallAzs = props.firewallSubnets.map((s) => s.availabilityZone);
+    // Protection flags are intentionally DISABLED for this sample.
+    //
+    // This is a stand-up / tear-down demo: `scripts/destroy.sh` runs
+    // `cdk destroy --all` the same day to control the hourly Network Firewall and
+    // NAT-gateway cost (see README "Cost note"). deleteProtection,
+    // firewallPolicyChangeProtection, and subnetChangeProtection would each block
+    // that automated teardown (and the scripted scenario activate/revert, which
+    // edit the policy and routes), forcing a manual disable step first.
+    //
+    // SECURITY RISK (production): with these false, the firewall, its policy, and
+    // its subnet associations can be deleted or modified without the extra guard.
+    // For any non-ephemeral deployment, set all three to `true` (and disable them
+    // deliberately only when you intend to tear down). Documented in SECURITY.md.
     this.firewall = new networkfirewall.CfnFirewall(this, "Firewall", {
       firewallName: FIREWALL_NAME,
       firewallPolicyArn: this.policy.attrFirewallPolicyArn,

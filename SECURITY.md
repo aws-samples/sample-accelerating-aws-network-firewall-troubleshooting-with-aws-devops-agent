@@ -39,7 +39,30 @@ process instead.
   Manager at runtime and held only in memory; it is never written to disk. If the
   password cannot be read, the server refuses to start rather than falling back
   to a default credential (the systemd unit then retries until the secret is
-  readable).
+  readable). **Intentional for the demo:** the auth is a small custom
+  implementation rather than a managed service. For production, replace it with
+  **Amazon Cognito** (hosted UI, session management, MFA) or **AWS IAM Identity
+  Center** for internal users — the page is a throwaway, single-instance status
+  view stood up and torn down the same day, so the custom login is deliberate.
+- **Agent role trust placeholder.** When `devopsAgentPrincipal` /
+  `devOpsAgentPrincipalArn` is not set, the read-only agent role trusts the
+  account root **constrained by an `sts:ExternalId` condition**
+  (`nf-devops-agent-placeholder-trust`), so the placeholder cannot be assumed by
+  an arbitrary in-account principal without the external id. This is a synth/
+  deploy convenience only; set the real Agent Space principal for production,
+  which replaces the placeholder trust entirely.
+- **Probe shared-secret.** The `X-Probe-Secret` header the probes send to the
+  test endpoint is randomly generated into AWS Secrets Manager at deploy
+  (`nf-devops-agent-probe-secret`) and read at runtime by both the endpoint
+  server and the health-check daemon — never hardcoded. It is defence in depth
+  on top of the NAT-EIP-scoped security group (the primary control).
+- **AWS Network Firewall protection flags are disabled.** `deleteProtection`,
+  `firewallPolicyChangeProtection`, and `subnetChangeProtection` are set to
+  `false` in `lib/firewall-stack.ts`. This is **intentional for the demo**: the
+  same-day `scripts/destroy.sh` teardown (the cost control) and the scripted
+  scenario activate/revert (which edit the policy and routes) would all be
+  blocked by these guards. For any non-ephemeral deployment, set all three to
+  `true` and disable them deliberately only when you intend to tear down.
 - **TLS terminates at Amazon CloudFront.** Traffic from Amazon CloudFront to the
   Application Load Balancer travels over the VPC-internal network on HTTP. Use
   the Amazon CloudFront `https://...cloudfront.net` URL, not the direct ALB URL.
@@ -78,25 +101,40 @@ not resource-scopable. They are the minimal viable scope:
   `Describe*` actions are scoped to the specific firewall, policy, and rule-group
   ARNs.
 
-## Use of real AWS endpoints in scenario probes
+## Self-deployed test endpoint for scenario probes
 
 The scenarios demonstrate a real firewall drop, so the probe targets must be
-**reachable, resolvable endpoints** that are healthy at baseline and only break
-when a scenario is activated. The following are intentional references to real
-AWS service endpoints used as functional test targets, not example placeholders:
+reachable endpoints that are healthy at baseline and only break when a scenario
+is activated. Rather than depend on external/real domains, the app deploys its
+own test endpoint (`NfTestEndpointStack`): a second, isolated VPC with two
+internet-facing Network Load Balancers (an "app" endpoint on 80/443/9142 and a
+separate "control" endpoint on 443) and a single SSM-managed target instance
+running a small stdlib server (HTTPS with a self-signed cert, raw TCP on 9142,
+HTTP `/healthz`). All probe targets are the **deploy-generated NLB DNS names**, so
+no real domain is hardcoded anywhere.
 
-- **`docs.aws.amazon.com`** (Scenario 1 domain deny list) and **`aws.amazon.com`**
-  (Scenario 3 asymmetric routing) — reachable HTTPS endpoints the workload probes
-  and the firewall then blocks.
-- **`cassandra.<region>.amazonaws.com:9142`** (Scenario 2) — the regional Amazon
-  Keyspaces (for Apache Cassandra) TLS endpoint, used as the stateless port-9142
-  test class.
-- **`sts.amazonaws.com`** (status-page control probe) — an AWS endpoint that no
-  scenario rule targets, used to distinguish a subnet-wide egress outage from an
-  isolated rule failure.
+Security properties of the test endpoint:
 
-These are not customer or third-party domains and are used only as live test
-targets within the deploying account's own egress path.
+- **Ingress is scoped to the deployment's egress IPs.** Network Load Balancers
+  preserve the client source IP, and all workload egress leaves the main VPC
+  through its two NAT gateway Elastic IPs. The target instance's security group
+  allows 80/443/9142 **only from those two NAT EIPs (/32)** — never `0.0.0.0/0`.
+  So although the NLBs are internet-facing (required for the traffic to egress
+  the firewall, reach the internet, and return), nothing on the internet other
+  than this deployment's egress can get a response.
+- **No public instance.** The target instance has no public IP and is SSM-managed,
+  matching the main workload's posture; only the NLBs face the internet.
+- **Defence in depth.** The HTTPS probes send a shared-secret header
+  (`X-Probe-Secret`) the server requires on non-health paths, so even an actor
+  inside the test VPC cannot trivially use the endpoint. The self-signed
+  certificate is acceptable because the probes only measure connect-success vs a
+  firewall-drop timeout (`curl -k`); the firewall inspects the TLS SNI regardless
+  of certificate validity.
+
+The example domains that appear as fallback defaults in the code (`app.example.com`,
+`control.example.com`, `db.example.com:9142`) are RFC-2606 example names used only
+when the stack is built standalone (e.g. unit tests); a real deploy always uses the
+generated NLB DNS names.
 
 ## What is solid
 
