@@ -1,4 +1,14 @@
-# AWS Network Firewall incident response with AWS DevOps Agent
+<h1 align="center">AWS Network Firewall incident response with AWS DevOps Agent</h1>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT--0-yellow.svg" alt="License: MIT-0"></a>
+  <a href="https://aws.amazon.com/cdk/"><img src="https://img.shields.io/badge/AWS_CDK-TypeScript-blue.svg" alt="AWS CDK TypeScript"></a>
+  <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/what-is-aws-network-firewall.html"><img src="https://img.shields.io/badge/AWS_Network_Firewall-Sample-orange.svg" alt="AWS Network Firewall"></a>
+  <a href="https://aws.amazon.com/devops-agent/"><img src="https://img.shields.io/badge/AWS_DevOps_Agent-Incident_Response-905BDC.svg" alt="AWS DevOps Agent"></a>
+  <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html"><img src="https://img.shields.io/badge/Amazon_CloudWatch-Alarms_%26_Logs-005EB8.svg" alt="Amazon CloudWatch"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Status-Demo-teal.svg" alt="Status: Demo"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Node.js-18%2B-green.svg" alt="Node.js 18+"></a>
+</p>
 
 A deployable AWS Network Firewall sample for incident response with AWS DevOps Agent. It stands up a sample Amazon Virtual Private Cloud (Amazon VPC) protected by AWS Network Firewall, wires up logging, Amazon CloudWatch alarms, and a least-privilege AWS Identity and Access Management (AWS IAM) role for the agent, then provides three reproducible break-fix scenarios. For each scenario the agent investigates using **native AWS APIs only** (AWS Network Firewall `Describe*`/`List*` calls plus Amazon CloudWatch Logs reads) and recommends a fix. There is no custom MCP server or bespoke tooling to maintain.
 
