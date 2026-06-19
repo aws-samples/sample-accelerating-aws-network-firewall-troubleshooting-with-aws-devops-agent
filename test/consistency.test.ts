@@ -58,11 +58,21 @@ const RECOMMENDED_FIXES: readonly string[] = [
 const describeOrSkip = BLOG_PATH ? describe : describe.skip;
 
 describeOrSkip("doc consistency: blog draft aligns with operator runbook (R11.8)", () => {
-  const runbookRaw = fs.readFileSync(RUNBOOK_PATH, "utf8");
-  const blogRaw = fs.readFileSync(BLOG_PATH as string, "utf8");
+  // Read the docs inside beforeAll (not in the describe body): a skipped
+  // describe still EXECUTES its body during collection, so reading files here
+  // would throw when the blog is absent (e.g. the public release, where
+  // BLOG_PATH is null). beforeAll is genuinely skipped when the suite is.
+  let runbookRaw = "";
+  let blogRaw = "";
+  let runbookNorm = "";
+  let blogNorm = "";
 
-  const runbookNorm = normalizeWhitespace(runbookRaw);
-  const blogNorm = normalizeWhitespace(blogRaw);
+  beforeAll(() => {
+    runbookRaw = fs.readFileSync(RUNBOOK_PATH, "utf8");
+    blogRaw = fs.readFileSync(BLOG_PATH as string, "utf8");
+    runbookNorm = normalizeWhitespace(runbookRaw);
+    blogNorm = normalizeWhitespace(blogRaw);
+  });
 
   describe("each scenario name is present in both docs", () => {
     it.each([...SCENARIO_NAMES])(
