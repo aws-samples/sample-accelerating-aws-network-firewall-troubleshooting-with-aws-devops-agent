@@ -1,6 +1,6 @@
 /**
  * WebhookStack — the bridge that wires the Amazon CloudWatch alarms to AWS
- * DevOps Agent (the "How the alarm pipeline works" path from the blog).
+ * DevOps Agent (the "How the alarm pipeline works" path).
  *
  * The alarm pipeline is: a CloudWatch alarm transitions to ALARM → publishes to
  * the Amazon Simple Notification Service (Amazon SNS) topic → SNS invokes this

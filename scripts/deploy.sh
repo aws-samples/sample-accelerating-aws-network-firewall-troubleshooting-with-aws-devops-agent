@@ -178,6 +178,6 @@ ${BOLD}NEXT STEPS${RST}
   4. Tear everything down when done:
        bash scripts/destroy.sh
 
-  Full walkthrough: blog/draft.md   Operator reference: runbook/runbook.md
+  Operator reference: runbook/runbook.md
 ${DIM}------------------------------------------------------------${RST}
 EOF

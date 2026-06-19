@@ -9,7 +9,7 @@
  * through a Network Firewall endpoint, so the three break-fix scenarios manifest
  * as drops on its traffic.
  *
- * Health-check daemon (mirrors the reference blog's per-check custom metrics):
+ * Health-check daemon (publishes per-check custom metrics):
  *   A systemd service runs a loop that probes one target per scenario and
  *   publishes a custom CloudWatch metric per check to the `NfAgent/Workload`
  *   namespace, dimensioned by `Firewall = <firewallName>`. A failed probe
@@ -31,7 +31,7 @@
  *   flips and clears when the alarm clears, regardless of how the fix was applied
  *   (the scenario script's revert, or a CLI command run on the agent's advice).
  *
- * Live status page (mirrors the reference blog's Figure 2 status page):
+ * Live status page (a browser view of the per-scenario alarm state):
  *   A second systemd service runs a tiny Python HTTP server on
  *   {@link STATUS_PAGE_PORT} that renders one green/red box per scenario from
  *   `status.json`. The status-page ALB (`lib/status-page-stack.ts`) fronts it on
@@ -1058,8 +1058,7 @@ def card(s, control_failing):
 
 def render_architecture():
     # Architecture-only view: the topology diagram with no scenario cards and no
-    # banner, all paths shown healthy. Used as the Figure 1 architecture
-    # placeholder for the blog, so it shows the data path and alarm pipeline
+    # banner, all paths shown healthy. Shows the data path and alarm pipeline
     # without the per-scenario status. Served at /architecture.
     try:
         with open(STATUS_FILE) as f:

@@ -11,8 +11,8 @@
  *   4. POSTs it to the AWS DevOps Agent webhook with the signature header.
  *
  * The agent validates the signature and starts an investigation. This is the
- * SNS -> Lambda -> Secrets Manager -> signed POST bridge described in the blog's
- * "How the alarm pipeline works" section.
+ * SNS -> Lambda -> Secrets Manager -> signed POST bridge that carries each
+ * firewall drop to AWS DevOps Agent.
  *
  * Plain CommonJS (no build step) so it deploys as a `lambda.Code.fromAsset`
  * directly. Only Node built-ins are required at module load; the AWS SDK v3

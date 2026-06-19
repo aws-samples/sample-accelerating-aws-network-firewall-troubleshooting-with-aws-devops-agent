@@ -1,7 +1,6 @@
 /**
  * StatusPageStack — an internet-facing Application Load Balancer that fronts the
- * workload's live status page (mirrors the reference blog's Figure 2 status
- * page).
+ * workload's live status page.
  *
  * The workload EC2 instance runs a tiny HTTP server (see `lib/workload-stack.ts`
  * `buildHealthCheckUserData`) on {@link STATUS_PAGE_PORT} that renders one

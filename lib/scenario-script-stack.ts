@@ -10,7 +10,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  * `scripts/nf-scenario.sh` is a pure-AWS-CLI driver that mutates the deployed
  * firewall directly (it discovers every resource id at runtime). Shipping it as
- * part of the deploy means the blog can hand the reader a fixed `aws s3 cp`
+ * part of the deploy means an operator can be handed a fixed `aws s3 cp`
  * command instead of relying on a public GitHub raw URL that only resolves once
  * the sample repo is published. The deploy puts the script in S3; the operator
  * pulls it in CloudShell and runs it.
@@ -19,7 +19,7 @@
  * Deterministic bucket name
  * ────────────────────────────────────────────────────────────────────────────
  * The bucket is named `nf-devops-agent-scripts-<account>-<region>`. Account
- * + region keep it globally unique while staying predictable, so the blog can
+ * + region keep it globally unique while staying predictable, so the docs can
  * publish a copy-paste command. The exact `aws s3 cp ...` line is also emitted
  * as the `ScenarioScriptDownload` stack output (printed by `scripts/deploy.sh`).
  *
@@ -54,7 +54,7 @@ export class ScenarioScriptStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Deterministic, predictable, globally unique bucket name so the blog can
+    // Deterministic, predictable, globally unique bucket name so the docs can
     // hand the reader a fixed download command.
     const bucketName = `nf-devops-agent-scripts-${this.account}-${this.region}`;
 
