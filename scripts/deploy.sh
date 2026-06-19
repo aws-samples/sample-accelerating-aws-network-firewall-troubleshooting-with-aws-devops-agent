@@ -80,8 +80,23 @@ step "3/6  Validating the project (compile$([ $SKIP_TESTS -eq 0 ] && echo ' + te
 npx tsc --noEmit || die "TypeScript compile failed. Fix the errors above and re-run."
 ok "TypeScript compiles"
 if [ "$SKIP_TESTS" -eq 0 ]; then
-  npx jest >/dev/null 2>&1 || die "Tests failed. Run 'npm test' to see details."
-  ok "All tests pass"
+  # Run the tests in-band and non-interactively, capturing output so that, on
+  # failure, the actual jest error is shown rather than a generic message.
+  # --runInBand uses a single process (no Jest worker pool): on some Node
+  # versions a worker can be force-exited during teardown and make Jest return a
+  # non-zero exit code even when every test passes, which would fail this gate
+  # spuriously. Running in-band avoids that and is plenty fast for this suite.
+  TEST_LOG="$(mktemp -t nf-deploy-tests.XXXXXX)"
+  if npx jest --ci --runInBand </dev/null >"$TEST_LOG" 2>&1; then
+    ok "All tests pass"
+    rm -f "$TEST_LOG"
+  else
+    printf "\n%s---- test output ----%s\n" "$DIM" "$RST" >&2
+    cat "$TEST_LOG" >&2
+    printf "%s---------------------%s\n" "$DIM" "$RST" >&2
+    rm -f "$TEST_LOG"
+    die "Tests failed (output above). You can also run 'npm test' directly, or 'bash scripts/deploy.sh --skip-tests' to deploy without the local test run."
+  fi
 else
   warn "Skipping tests (--skip-tests)"
 fi
