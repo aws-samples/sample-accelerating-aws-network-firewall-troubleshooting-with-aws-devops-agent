@@ -332,7 +332,17 @@ export class WorkloadStack extends cdk.Stack {
     // on build-time constants) and written into the asset directory at synth
     // time, next to the committed nf_icons.py.
     const assetDir = path.join(__dirname, "..", "assets", "status-page");
-    fs.writeFileSync(path.join(assetDir, "statuspage.py"), this.buildStatusServer(), "utf8");
+    // Write the generated server atomically (temp file + rename) so a concurrent
+    // reader never observes a half-written file. The CDK test suite constructs
+    // this stack from several test files that Jest runs in parallel worker
+    // processes, each regenerating this same deterministic file; a plain
+    // writeFileSync can be truncated mid-read by another worker. rename(2) within
+    // the same directory is atomic on POSIX, so readers always see a complete
+    // (and identical) file.
+    const statusServerPath = path.join(assetDir, "statuspage.py");
+    const tmpPath = `${statusServerPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, this.buildStatusServer(), "utf8");
+    fs.renameSync(tmpPath, statusServerPath);
     const pageAsset = new s3assets.Asset(this, "StatusPageAsset", {
       path: assetDir,
     });
