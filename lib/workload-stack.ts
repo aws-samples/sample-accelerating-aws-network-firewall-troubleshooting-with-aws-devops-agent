@@ -1015,7 +1015,7 @@ def topology(scenarios, control_failing):
     ah = 9            # arrowhead length, so the path stops where the head begins
     leg_defs = [
         # leg 1: top-center edge -> top-center edge (arrow lands centered, points down)
-        ("e_l1", c1, "HTTPS :443",
+        ("e_l1", c1, "HTTPS &#183; SNI",
          "M%.0f,%.0f C%.0f,%.0f %.0f,%.0f %.0f,%.0f" % (
              igwTopX, igwTopY, igwTopX, igwTopY - bow, epTopX, epTopY - bow, epTopX, epTopY - ah),
          (igwTopX + epTopX) / 2.0, igwTopY - bow - 2),
@@ -1028,7 +1028,7 @@ def topology(scenarios, control_failing):
         # leg 3: bottom-center edge -> bottom-center edge (arrow lands centered, points up).
         # The two node labels are pushed BELOW this shallow arc (label_dy), so the
         # line runs between the box bottom and the text, never over the words.
-        ("e_l3", c3, "HTTPS :443",
+        ("e_l3", c3, "HTTPS &#183; routing",
          "M%.0f,%.0f C%.0f,%.0f %.0f,%.0f %.0f,%.0f" % (
              igwBotX, igwBotY, igwBotX, igwBotY + botBow, epBotX, epBotY + botBow, epBotX, epBotY + ah),
          (igwBotX + epBotX) / 2.0, igwBotY + botBow + 6),
