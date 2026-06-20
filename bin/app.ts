@@ -168,11 +168,17 @@ const testEndpoint = new TestEndpointStack(app, "NfTestEndpointStack", {
 // Effective probe targets + Scenario 1 SNI domain, derived from the test
 // endpoint's generated NLB DNS names unless explicitly overridden via context.
 const appDns = testEndpoint.appEndpointDns;
+const s3Dns = testEndpoint.s3EndpointDns;
 const controlDns = testEndpoint.controlEndpointDns;
 const effectiveSaasTestDomain = saasTestDomainOverride || appDns;
 const effectiveDomainTargetUrl = domainTargetUrl || `https://${appDns}`;
 const effectiveStatelessTargetUrl = statelessTargetUrl || `${appDns}:9142`;
-const effectiveAsymmetricTargetUrl = asymmetricTargetUrl || `https://${appDns}`;
+// Scenario 3 probes a DISTINCT host (the s3 endpoint), not appDns: Scenario 1's
+// TLS SNI deny matches the app endpoint's hostname, and since S1 and S3 are both
+// HTTPS :443, sharing one host made breaking S1 also drop the S3 probe (tripping
+// Alarm-3 collaterally). A separate host keeps S1 isolated while S3 still fails
+// correctly under the subnet-wide asymmetric-routing outage.
+const effectiveAsymmetricTargetUrl = asymmetricTargetUrl || `https://${s3Dns}`;
 const effectiveControlTargetUrl = controlTargetUrl || `https://${controlDns}`;
 
 // 2. Firewall — NF + policy + rule groups; wires the firewall-endpoint routes.
@@ -368,7 +374,11 @@ new cdk.CfnOutput(scenarioScript, "ScenarioScriptDownload", {
 // Test-endpoint stack outputs: the generated NLB DNS names the scenarios probe.
 new cdk.CfnOutput(testEndpoint, "AppEndpointDnsOut", {
   value: testEndpoint.appEndpointDns,
-  description: "Test endpoint (app) NLB DNS name — Scenario 1/2/3 probe target",
+  description: "Test endpoint (app) NLB DNS name — Scenario 1 and 2 probe target",
+});
+new cdk.CfnOutput(testEndpoint, "S3EndpointDnsOut", {
+  value: testEndpoint.s3EndpointDns,
+  description: "Test endpoint (s3) NLB DNS name — Scenario 3 probe target (distinct host)",
 });
 new cdk.CfnOutput(testEndpoint, "ControlEndpointDnsOut", {
   value: testEndpoint.controlEndpointDns,

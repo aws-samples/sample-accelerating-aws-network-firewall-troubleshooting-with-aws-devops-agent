@@ -22,12 +22,16 @@
  *     instance lives here, no public IP), an IGW, and one NAT gateway so the
  *     private instance can reach SSM / package mirrors at boot.
  *   - NLB-A ("app" endpoint): internet-facing, TCP listeners on 80, 443, 9142.
- *     Scenarios 1 (HTTPS SNI), 2 (raw TCP 9142), and 3 (HTTPS) all target this.
+ *     Scenarios 1 (HTTPS SNI) and 2 (raw TCP 9142) target this.
+ *   - NLB-S3 ("s3" endpoint): internet-facing, TCP listener on 443 only. The
+ *     Scenario 3 HTTPS probe targets this SEPARATE hostname so Scenario 1's SNI
+ *     drop (which matches the app endpoint's DNS name) never collaterally takes
+ *     the Scenario 3 probe down — both are HTTPS :443 and SNI is just the host.
  *   - NLB-B ("control" endpoint): internet-facing, TCP listener on 443 only. The
  *     page-only control probe targets this. It is a SEPARATE hostname so the
  *     Scenario 1 SNI drop (which matches the app endpoint's DNS name) never
  *     takes the control probe down.
- *   - 1 target instance behind both NLBs running a tiny stdlib server: HTTPS on
+ *   - 1 target instance behind all NLBs running a tiny stdlib server: HTTPS on
  *     443 (self-signed), HTTP on 80, a raw TCP accept on 9142, and `/healthz`.
  *
  * ────────────────────────────────────────────────────────────────────────────
@@ -79,13 +83,22 @@ export interface TestEndpointStackProps extends cdk.StackProps {
 }
 
 /**
- * The internet-facing test endpoint. Exposes the two NLB DNS names so the
- * firewall stack (SNI rule) and the workload stack (probes) can reference them
- * as tokens — no literal domain anywhere.
+ * The internet-facing test endpoint. Exposes the NLB DNS names so the firewall
+ * stack (SNI rule) and the workload stack (probes) can reference them as tokens
+ * — no literal domain anywhere.
  */
 export class TestEndpointStack extends cdk.Stack {
-  /** DNS name of the "app" NLB (Scenarios 1/2/3 target this). */
+  /** DNS name of the "app" NLB (Scenarios 1 and 2 target this). */
   public readonly appEndpointDns: string;
+  /**
+   * DNS name of the "s3" NLB (Scenario 3 targets this). Scenario 3 needs its OWN
+   * hostname so Scenario 1's TLS SNI deny rule (which matches the app endpoint's
+   * DNS name) cannot collaterally drop the Scenario 3 HTTPS probe — both are
+   * HTTPS :443, and SNI is just the hostname, so sharing one host made breaking
+   * S1 also trip the S3 alarm. A distinct host keeps S1 isolated while S3 still
+   * fails correctly under the subnet-wide asymmetric-routing outage.
+   */
+  public readonly s3EndpointDns: string;
   /** DNS name of the "control" NLB (the page-only control probe targets this). */
   public readonly controlEndpointDns: string;
 
@@ -184,6 +197,16 @@ export class TestEndpointStack extends cdk.Stack {
     this.addTcpListener(appNlb, "App443", PORT_HTTPS, instanceTarget, vpc);
     this.addTcpListener(appNlb, "App9142", PORT_TCP9142, instanceTarget, vpc);
 
+    // ── NLB-S3 ("s3"): listener on 443 only. Scenario 3's HTTPS probe targets
+    //    this DISTINCT host so Scenario 1's SNI deny (matched on the app host)
+    //    cannot collaterally drop it. Same backing instance. ──
+    const s3Nlb = new elbv2.NetworkLoadBalancer(this, "S3Nlb", {
+      vpc,
+      internetFacing: true,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+    this.addTcpListener(s3Nlb, "S3443", PORT_HTTPS, instanceTarget, vpc);
+
     // ── NLB-B ("control"): listener on 443 only ──
     const controlNlb = new elbv2.NetworkLoadBalancer(this, "ControlNlb", {
       vpc,
@@ -193,13 +216,18 @@ export class TestEndpointStack extends cdk.Stack {
     this.addTcpListener(controlNlb, "Control443", PORT_HTTPS, instanceTarget, vpc);
 
     this.appEndpointDns = appNlb.loadBalancerDnsName;
+    this.s3EndpointDns = s3Nlb.loadBalancerDnsName;
     this.controlEndpointDns = controlNlb.loadBalancerDnsName;
 
     Tags.of(this).add(PROJECT_TAG_KEY, PROJECT_TAG_VALUE);
 
     new cdk.CfnOutput(this, "AppEndpointDns", {
       value: this.appEndpointDns,
-      description: "Test endpoint (app) NLB DNS name — Scenario 1/2/3 probe target",
+      description: "Test endpoint (app) NLB DNS name — Scenario 1 and 2 probe target",
+    });
+    new cdk.CfnOutput(this, "S3EndpointDns", {
+      value: this.s3EndpointDns,
+      description: "Test endpoint (s3) NLB DNS name — Scenario 3 probe target (distinct host)",
     });
     new cdk.CfnOutput(this, "ControlEndpointDns", {
       value: this.controlEndpointDns,

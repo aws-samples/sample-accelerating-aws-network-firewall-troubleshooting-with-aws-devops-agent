@@ -139,6 +139,12 @@ INSTANCE_ID="$(get_output NfWorkloadStack WorkloadInstanceId)"
 SCRIPT_DL="$(get_output NfScenarioScriptStack ScenarioScriptDownload)"
 PAGE_USER="$(get_output NfWorkloadStack StatusPageUsername)"
 PAGE_SECRET="$(get_output NfWorkloadStack StatusPagePasswordSecret)"
+# Per-scenario probe-target endpoints (the self-deployed test endpoint NLB DNS
+# names). Scenario 1 and 2 share the "app" host; Scenario 3 uses its own host so
+# Scenario 1's TLS SNI deny cannot collaterally drop it.
+APP_DNS="$(get_output NfTestEndpointStack AppEndpointDnsOut)"
+S3_DNS="$(get_output NfTestEndpointStack S3EndpointDnsOut)"
+CONTROL_DNS="$(get_output NfTestEndpointStack ControlEndpointDnsOut)"
 # Read the generated password from AWS Secrets Manager (never a CFN output).
 # SAMPLE ONLY: this prints the page password to the terminal for convenience.
 # In production / CI, do not echo secrets to stdout (they land in terminal
@@ -157,6 +163,12 @@ ${GRN}${BOLD}============================================================${RST}
   ${BOLD}Webhook fn:${RST}   ${WEBHOOK_FN:-nf-devops-agent-webhook}
   ${BOLD}Webhook secret:${RST} ${WEBHOOK_SECRET:-nf-devops-agent-webhook-credentials}
   ${BOLD}Workload:${RST}     ${INSTANCE_ID:-<NfWorkloadStack WorkloadInstanceId>}
+
+  ${BOLD}Scenario probe targets${RST} (the value to use in each scenario's break step):
+    ${BOLD}Scenario 1${RST} (domain deny, TLS SNI on 443): ${APP_DNS:-<NfTestEndpointStack AppEndpointDnsOut>}
+    ${BOLD}Scenario 2${RST} (stateless priority, TCP 9142): ${APP_DNS:-<NfTestEndpointStack AppEndpointDnsOut>}:9142
+    ${BOLD}Scenario 3${RST} (asymmetric routing, HTTPS 443): ${S3_DNS:-<NfTestEndpointStack S3EndpointDnsOut>}
+    ${DIM}control probe (page-only, untouched by any scenario): ${CONTROL_DNS:-<NfTestEndpointStack ControlEndpointDnsOut>}${RST}
 
 ${BOLD}NEXT STEPS${RST}
   1. Open the status page above and sign in with the page login. All three

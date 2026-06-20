@@ -1,11 +1,11 @@
 /**
  * CDK assertion tests for `lib/test-endpoint-stack.ts`.
  *
- * The test endpoint is internet-facing (two Network Load Balancers) so the
- * scenario probes can egress the firewall, reach the internet, and return. The
- * security guarantee is that the TARGET instance only accepts traffic from the
- * solution's NAT gateway EIPs — never `0.0.0.0/0` — and has no public IP. These
- * tests lock that posture in.
+ * The test endpoint is internet-facing (three Network Load Balancers: app, s3,
+ * and control) so the scenario probes can egress the firewall, reach the
+ * internet, and return. The security guarantee is that the TARGET instance only
+ * accepts traffic from the solution's NAT gateway EIPs — never `0.0.0.0/0` — and
+ * has no public IP. These tests lock that posture in.
  */
 import * as cdk from "aws-cdk-lib";
 import { Template, Match } from "aws-cdk-lib/assertions";
@@ -97,8 +97,8 @@ describe("TestEndpointStack CDK assertions", () => {
     expect(udStr).not.toContain('"AssociatePublicIpAddress":true');
   });
 
-  it("creates two internet-facing Network Load Balancers (app + control)", () => {
-    template.resourceCountIs("AWS::ElasticLoadBalancingV2::LoadBalancer", 2);
+  it("creates three internet-facing Network Load Balancers (app + s3 + control)", () => {
+    template.resourceCountIs("AWS::ElasticLoadBalancingV2::LoadBalancer", 3);
     const lbs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer");
     for (const lb of Object.values(lbs)) {
       const p = lb.Properties as Record<string, unknown>;
@@ -112,9 +112,13 @@ describe("TestEndpointStack CDK assertions", () => {
     const ports = Object.values(listeners).map(
       (l) => (l.Properties as Record<string, unknown>).Port,
     );
-    // App NLB: 80, 443, 9142. Control NLB: 443. (443 appears twice.)
+    // App NLB: 80, 443, 9142. S3 NLB: 443. Control NLB: 443. (443 appears 3x.)
     expect(ports).toEqual(expect.arrayContaining([80, 443, 9142]));
-    expect(ports.filter((p) => p === 443).length).toBe(2);
+    expect(ports.filter((p) => p === 443).length).toBe(3);
+  });
+
+  it("exposes a distinct Scenario 3 endpoint DNS output (isolated from the app host)", () => {
+    template.hasOutput("S3EndpointDns", Match.objectLike({}));
   });
 
   it("runs the target server as an SSM-managed instance (no SSH key)", () => {
