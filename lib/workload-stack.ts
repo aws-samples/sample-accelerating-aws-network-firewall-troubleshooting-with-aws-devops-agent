@@ -824,14 +824,11 @@ T_AMBER = "#ffd23f"
 T_IDLE = "#3a5170"
 T_LINE = "#2c4a6a"
 
-def leg_color(s, control_failing):
-    sid = str(s.get("id"))
-    failing = bool(s.get("failing"))
-    if control_failing:
-        return T_RED if sid == "3" else T_AMBER
-    if not failing:
-        return T_GREEN
-    return T_RED
+def leg_color(s):
+    # Each leg reflects only its own scenario's alarm: green when healthy, red
+    # when that scenario is failing. No cross-scenario "collateral" coloring — the
+    # page mirrors the exact per-alarm state DevOps Agent sees.
+    return T_RED if bool(s.get("failing")) else T_GREEN
 
 def _card(cx, cy, icon, title, sub, accent, icon_px=46, label_dy=0):
     # An icon-only rounded card with a colored status ring, and the label BELOW
@@ -935,18 +932,25 @@ def topology(scenarios, control_failing):
     s1 = by_id.get("1", {"id": 1})
     s2 = by_id.get("2", {"id": 2})
     s3 = by_id.get("3", {"id": 3})
-    c1, c2, c3 = leg_color(s1, control_failing), leg_color(s2, control_failing), leg_color(s3, control_failing)
-    any_failing = any(bool(x.get("failing")) for x in (s1, s2, s3))
-    trunk = T_RED if control_failing else T_GREEN
-    # The workload -> firewall ("inspect") segment carries traffic INTO the
-    # firewall, which is where the Scenario 1 (TLS SNI deny) and Scenario 2
-    # (stateless priority) drops actually happen. So when either is active, that
-    # segment is partially dropping and is drawn AMBER — it cannot be all green
-    # while the firewall is dropping. Under Scenario 3 the whole egress path is
-    # down (asymmetric routing), so the trunk, including this segment, is red.
-    s1_or_s2_failing = bool(s1.get("failing")) or bool(s2.get("failing"))
-    inspect = trunk if control_failing else (T_AMBER if s1_or_s2_failing else T_GREEN)
-    fw_accent = T_RED if control_failing else "#4aa3ff"
+    s1f = bool(s1.get("failing"))
+    s2f = bool(s2.get("failing"))
+    s3f = bool(s3.get("failing"))
+    c1, c2, c3 = leg_color(s1), leg_color(s2), leg_color(s3)
+    any_failing = s1f or s2f or s3f
+    # The page mirrors the EXACT per-alarm state (what DevOps Agent sees), so a
+    # leg/segment only changes when its own alarm is firing.
+    #  - inspect (workload -> firewall): the Scenario 1 (TLS SNI) and Scenario 2
+    #    (stateless priority) drops happen AT the firewall, so this segment is
+    #    amber when either is failing.
+    #  - egress (firewall -> NAT -> IGW): Scenario 3's asymmetric routing takes the
+    #    whole egress path down, so this segment is red when Scenario 3 is failing.
+    #    Scenario 3 does NOT light Alarm-1 (a routing fault is not a firewall drop),
+    #    so the Scenario 1 leg stays green during a Scenario 3 outage.
+    inspect = T_AMBER if (s1f or s2f) else T_GREEN
+    egress = T_RED if s3f else T_GREEN
+    # Firewall card ring: red under the Scenario 3 path outage, amber when the
+    # firewall is actively dropping (Scenario 1/2), else the normal blue.
+    fw_accent = T_RED if s3f else (T_AMBER if (s1f or s2f) else "#4aa3ff")
     pipe = T_AMBER if any_failing else T_IDLE
 
     W, H = 1030, 620
@@ -973,7 +977,7 @@ def topology(scenarios, control_failing):
     # DNS name (it would leak the infrastructure type), just a generic endpoint.
     target_label = "Web endpoint"
 
-    used = set([trunk, inspect, fw_accent, c1, c2, c3, pipe])
+    used = set([inspect, egress, fw_accent, c1, c2, c3, pipe])
     markers = "".join(_arrowmarker(c) for c in used)
 
     svg = ['<svg viewBox="0 0 ' + str(W) + ' ' + str(H) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="VPC egress path and alarm pipeline">']
@@ -994,19 +998,18 @@ def topology(scenarios, control_failing):
     svg.append('<text x="843" y="' + str(vpc_y + 8) + '" text-anchor="middle" class="grp" fill="#8298b3">INTERNET</text>')
 
     # ---- Trunk edges: workload -> firewall -> NAT -> IGW ----
-    # The workload->firewall "inspect" segment is amber when S1/S2 is dropping at
-    # the firewall (red under the S3 path outage); the firewall->NAT->IGW egress
-    # segments stay on the trunk color (green for S1/S2 — traffic that the firewall
-    # passes still egresses fine; red only under S3).
+    # inspect (workload->firewall) is amber when S1/S2 drop at the firewall; the
+    # egress segments (firewall->NAT->IGW) turn red only under the S3 routing
+    # outage. Each reflects its own alarm, so nothing changes color spuriously.
     flow = []
     svg.append(_curve(wlX + half, midY, fwX - half, midY, inspect, "e_t1"))
     svg.append(_pill((wlX + fwX) / 2.0, midY - 28, "inspect", inspect))
-    svg.append(_curve(fwX + half, midY, natX - half, midY, trunk, "e_t2"))
-    svg.append(_pill((fwX + natX) / 2.0, midY - 28, "egress", trunk))
-    svg.append(_curve(natX + half, midY, igwX - igwHW, midY, trunk, "e_t3"))
+    svg.append(_curve(fwX + half, midY, natX - half, midY, egress, "e_t2"))
+    svg.append(_pill((fwX + natX) / 2.0, midY - 28, "egress", egress))
+    svg.append(_curve(natX + half, midY, igwX - igwHW, midY, egress, "e_t3"))
     if inspect == T_GREEN:
         flow.append(_flowdot("e_t1", T_GREEN, "2.6s", "0s"))
-    if trunk == T_GREEN:
+    if egress == T_GREEN:
         flow.append(_flowdot("e_t2", T_GREEN, "2.6s", "0.5s"))
         flow.append(_flowdot("e_t3", T_GREEN, "2.6s", "1.0s"))
 
@@ -1087,13 +1090,15 @@ def topology(scenarios, control_failing):
     svg.append("".join(flow))
 
     # ---- Data-plane nodes ----
-    svg.append(_card(wlX, midY, ICON_EC2, "Workload", "Amazon EC2", trunk))
+    # Workload card: amber while the firewall is dropping its traffic (S1/S2), red
+    # under the S3 path outage, else green.
+    wl_accent = T_RED if s3f else (T_AMBER if (s1f or s2f) else T_GREEN)
+    svg.append(_card(wlX, midY, ICON_EC2, "Workload", "Amazon EC2", wl_accent))
     svg.append(_card(fwX, midY, ICON_NFW, "Network Firewall", "policy + rules", fw_accent))
-    svg.append(_card(natX, midY, ICON_NAT, "NAT gateway", "egress", trunk))
-    svg.append(_card_labeled(igwX, midY, ICON_IGW, "Internet", "gateway", trunk, icon_px=34, box_w=igwHW * 2))
+    svg.append(_card(natX, midY, ICON_NAT, "NAT gateway", "egress", egress))
+    svg.append(_card_labeled(igwX, midY, ICON_IGW, "Internet", "gateway", egress, icon_px=34, box_w=igwHW * 2))
     # Single internet web endpoint that all three legs reach. Its ring reflects
-    # the worst leg state (red if any leg is the dropped root cause, else amber
-    # if any is collateral, else green). The label is the auto-generated URL.
+    # the worst leg state (red if any leg is dropped, else green).
     if T_RED in (c1, c2, c3):
         ep_accent = T_RED
     elif T_AMBER in (c1, c2, c3):
@@ -1136,34 +1141,21 @@ def topology(scenarios, control_failing):
 def card(s, control_failing):
     sid = str(s.get("id"))
     failing = bool(s.get("failing"))
-    # When the control probe reports a subnet-wide egress outage, render the
-    # Scenario 3 blast radius directly off that signal so the page is internally
-    # consistent the instant the banner appears. The control probe has no alarm
-    # lag, whereas the three alarms can transition a cycle apart (alarm 3 often
-    # last), which would otherwise briefly show the banner with Scenario 3 still
-    # green. Under the outage: Scenario 3 is the root cause, 1 and 2 collateral.
-    if control_failing:
-        if sid == "3":
-            cls, state = "bad", "DROPPED"
-            collateral = False
-        else:
-            cls, state = "warn", "UNREACHABLE (collateral)"
-            collateral = True
-    elif not failing:
-        cls, state, collateral = "ok", "Healthy", False
+    # The card mirrors this scenario's OWN alarm state — the exact state DevOps
+    # Agent sees. No cross-scenario "collateral" override: under a Scenario 3
+    # outage, Scenario 3 and Scenario 2 read DROPPED (their alarms fire) while
+    # Scenario 1 stays Healthy (a routing fault does not light the native
+    # DroppedPackets alarm). control_failing is accepted for signature
+    # compatibility but no longer changes a card's own state.
+    if not failing:
+        cls, state = "ok", "Healthy"
     else:
-        cls, state, collateral = "bad", "DROPPED", False
+        cls, state = "bad", "DROPPED"
     name = html.escape(str(s.get("name")))
     metric = html.escape(str(s.get("metric")))
     condition = html.escape(str(s.get("condition", "")))
     note = ""
-    if collateral:
-        note = (
-            '<span class="note">This scenario\\'s own condition is NOT firing. '
-            'The Scenario 3 routing change took the whole egress path down, so this '
-            'probe times out as collateral.</span>'
-        )
-    elif cls == "bad":
+    if cls == "bad":
         note = '<span class="note">Condition: ' + condition + '</span>'
     # Cards sit 3-across in the bottom row; no special centering needed.
     return (
@@ -1258,9 +1250,10 @@ def render_live(data):
             '<div class="banner"><b>Subnet-wide egress outage detected.</b> '
             'A control probe to an endpoint no scenario rule targets is also failing, so the '
             'egress <b>path</b> is down, not one traffic class. This is the Scenario 3 '
-            'scope: the asymmetric route makes every flow drop, so all three alarms fire at '
-            'once and DevOps Agent correlates them to the single routing root cause. Scenario '
-            '1 and 2 below are <b>collateral</b>; their own conditions are not firing.</div>'
+            'scope: the asymmetric route makes every flow drop, so the two application '
+            'health alarms (Scenario 2 and Scenario 3) fire together and DevOps Agent '
+            'correlates them to the single routing root cause. The native DroppedPackets '
+            'alarm (Scenario 1) stays quiet, because a routing fault is not a firewall drop.</div>'
         )
     return (
         '<span data-updated="' + updated + '" style="display:none"></span>'
