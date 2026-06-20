@@ -938,6 +938,14 @@ def topology(scenarios, control_failing):
     c1, c2, c3 = leg_color(s1, control_failing), leg_color(s2, control_failing), leg_color(s3, control_failing)
     any_failing = any(bool(x.get("failing")) for x in (s1, s2, s3))
     trunk = T_RED if control_failing else T_GREEN
+    # The workload -> firewall ("inspect") segment carries traffic INTO the
+    # firewall, which is where the Scenario 1 (TLS SNI deny) and Scenario 2
+    # (stateless priority) drops actually happen. So when either is active, that
+    # segment is partially dropping and is drawn AMBER — it cannot be all green
+    # while the firewall is dropping. Under Scenario 3 the whole egress path is
+    # down (asymmetric routing), so the trunk, including this segment, is red.
+    s1_or_s2_failing = bool(s1.get("failing")) or bool(s2.get("failing"))
+    inspect = trunk if control_failing else (T_AMBER if s1_or_s2_failing else T_GREEN)
     fw_accent = T_RED if control_failing else "#4aa3ff"
     pipe = T_AMBER if any_failing else T_IDLE
 
@@ -965,7 +973,7 @@ def topology(scenarios, control_failing):
     # DNS name (it would leak the infrastructure type), just a generic endpoint.
     target_label = "Web endpoint"
 
-    used = set([trunk, fw_accent, c1, c2, c3, pipe])
+    used = set([trunk, inspect, fw_accent, c1, c2, c3, pipe])
     markers = "".join(_arrowmarker(c) for c in used)
 
     svg = ['<svg viewBox="0 0 ' + str(W) + ' ' + str(H) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="VPC egress path and alarm pipeline">']
@@ -986,14 +994,19 @@ def topology(scenarios, control_failing):
     svg.append('<text x="843" y="' + str(vpc_y + 8) + '" text-anchor="middle" class="grp" fill="#8298b3">INTERNET</text>')
 
     # ---- Trunk edges: workload -> firewall -> NAT -> IGW ----
+    # The workload->firewall "inspect" segment is amber when S1/S2 is dropping at
+    # the firewall (red under the S3 path outage); the firewall->NAT->IGW egress
+    # segments stay on the trunk color (green for S1/S2 — traffic that the firewall
+    # passes still egresses fine; red only under S3).
     flow = []
-    svg.append(_curve(wlX + half, midY, fwX - half, midY, trunk, "e_t1"))
-    svg.append(_pill((wlX + fwX) / 2.0, midY - 28, "inspect", trunk))
+    svg.append(_curve(wlX + half, midY, fwX - half, midY, inspect, "e_t1"))
+    svg.append(_pill((wlX + fwX) / 2.0, midY - 28, "inspect", inspect))
     svg.append(_curve(fwX + half, midY, natX - half, midY, trunk, "e_t2"))
     svg.append(_pill((fwX + natX) / 2.0, midY - 28, "egress", trunk))
     svg.append(_curve(natX + half, midY, igwX - igwHW, midY, trunk, "e_t3"))
-    if trunk == T_GREEN:
+    if inspect == T_GREEN:
         flow.append(_flowdot("e_t1", T_GREEN, "2.6s", "0s"))
+    if trunk == T_GREEN:
         flow.append(_flowdot("e_t2", T_GREEN, "2.6s", "0.5s"))
         flow.append(_flowdot("e_t3", T_GREEN, "2.6s", "1.0s"))
 
