@@ -1,4 +1,4 @@
-<h1 align="center">AWS Network Firewall incident response with AWS DevOps Agent</h1>
+<h1 align="center">Accelerating AWS Network Firewall incident response with AWS DevOps Agent</h1>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT--0-yellow.svg" alt="License: MIT-0"></a>
