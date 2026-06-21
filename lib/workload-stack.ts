@@ -1122,21 +1122,7 @@ def topology(scenarios, control_failing):
     svg.append('</g>')
     svg.append('</svg>')
 
-    return ('<div class="topo"><h3>How a firewall drop reaches AWS DevOps Agent</h3>'
-            '<div class="topolegend">'
-            '<div class="tlrow"><span class="tlk">Top row, traffic</span>'
-            '<span class="tlpath">Workload &rarr; Network Firewall &rarr; NAT gateway &rarr; internet gateway &rarr; target</span>'
-            '<span class="tlnote"><span class="swatch sw-red"></span>a leg turns red where the firewall drops it</span></div>'
-            '<div class="tlrow"><span class="tlk">Bottom row, detection</span>'
-            '<span class="tlpath">CloudWatch metric &rarr; alarm &rarr; SNS &rarr; webhook Lambda &rarr; DevOps Agent</span>'
-            '<span class="tlnote"><span class="swatch sw-amber"></span>the row turns amber while an alarm is active</span></div>'
-            '</div>'
-            + "".join(svg) + '</div>')
-
-    return ('<div class="topo"><h3>VPC egress path</h3>'
-            '<p>Workload traffic leaves through the Network Firewall and NAT gateway to each target. '
-            'A red segment is exactly where the firewall is dropping.</p>'
-            + "".join(svg) + '</div>')
+    return ('<div class="topo">' + "".join(svg) + '</div>')
 
 def card(s, control_failing):
     sid = str(s.get("id"))

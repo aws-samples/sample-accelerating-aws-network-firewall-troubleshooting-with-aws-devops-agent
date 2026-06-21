@@ -314,7 +314,7 @@ describe("WorkloadStack CDK assertions", () => {
     const assetPath = pathJoin(__dirname, "..", "assets", "status-page", "statuspage.py");
     const page = readFileSync(assetPath, "utf8");
     expect(page).toContain(String(STATUS_PAGE_PORT));
-    expect(page).toContain("VPC egress path");
+    expect(page).toContain('class="topo"');
     expect(page).toContain("import nf_icons");
   });
 
