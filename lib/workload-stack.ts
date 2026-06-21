@@ -975,7 +975,7 @@ def topology(scenarios, control_failing):
     # Generic endpoint label. The node represents "a web server reached over the
     # internet" — we deliberately do NOT show the auto-generated load-balancer
     # DNS name (it would leak the infrastructure type), just a generic endpoint.
-    target_label = "Web endpoint"
+    target_label = "Test endpoint"
 
     used = set([inspect, egress, fw_accent, c1, c2, c3, pipe])
     markers = "".join(_arrowmarker(c) for c in used)
