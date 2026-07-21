@@ -137,6 +137,10 @@ WEBHOOK_FN="$(get_output NfWebhookStack WebhookFunctionName)"
 WEBHOOK_SECRET="$(get_output NfWebhookStack WebhookSecretName)"
 INSTANCE_ID="$(get_output NfWorkloadStack WorkloadInstanceId)"
 SCRIPT_DL="$(get_output NfScenarioScriptStack ScenarioScriptDownload)"
+# Agent space ARN (present only when NfAgentSpaceStack was deployed, i.e.
+# deployAgentSpace != false and a DevOps Agent supported region). Empty string
+# when the agent space was not deployed, which selects the manual-onboarding text.
+AGENT_SPACE_ARN="$(get_output NfAgentSpaceStack AgentSpaceArn)"
 PAGE_USER="$(get_output NfWorkloadStack StatusPageUsername)"
 PAGE_SECRET="$(get_output NfWorkloadStack StatusPagePasswordSecret)"
 # Per-scenario probe-target endpoints (the self-deployed test endpoint NLB DNS
@@ -151,6 +155,31 @@ CONTROL_DNS="$(get_output NfTestEndpointStack ControlEndpointDnsOut)"
 # history and build logs); fetch them from AWS Secrets Manager when needed.
 PAGE_PASS="$(aws secretsmanager get-secret-value --secret-id "${PAGE_SECRET:-nf-devops-agent-statuspage-login}" --region "$REGION" --query SecretString --output text 2>/dev/null)"
 
+# Build NEXT STEPS step 2 based on whether the agent space was created for the
+# reader (NfAgentSpaceStack, default) or must be onboarded manually
+# (deployAgentSpace=false). `read -d ''` returns non-zero at EOF, so guard it
+# against `set -e` with `|| true`.
+if [ -n "${AGENT_SPACE_ARN:-}" ]; then
+  IFS= read -r -d '' AGENT_STEP <<STEP || true
+  2. Connect AWS DevOps Agent to the webhook (manual, one time):
+       The agent space was created for you by NfAgentSpaceStack:
+         ${AGENT_SPACE_ARN}
+       - In that agent space, create the DevOps Agent webhook and copy its URL + signing secret.
+       - Open the status page's "Configure webhook" link, paste them, and save
+         (the page writes them to Secrets Manager for you; no AWS CLI).
+       - Send a test event to the '${WEBHOOK_FN:-nf-devops-agent-webhook}' AWS Lambda function; a 200 confirms the path.
+STEP
+else
+  IFS= read -r -d '' AGENT_STEP <<STEP || true
+  2. Connect AWS DevOps Agent (manual, one time):
+       - Create an Agent Space and grant it the agent role above.
+       - Configure the DevOps Agent webhook, then open the status page's
+         "Configure webhook" link, paste the webhook URL + signing secret, and
+         save. The page writes them to Secrets Manager for you (no AWS CLI).
+       - Send a test event to the '${WEBHOOK_FN:-nf-devops-agent-webhook}' AWS Lambda function; a 200 confirms the path.
+STEP
+fi
+
 cat <<EOF
 
 ${GRN}${BOLD}============================================================${RST}
@@ -160,6 +189,7 @@ ${GRN}${BOLD}============================================================${RST}
   ${BOLD}Status page:${RST}  ${STATUS_URL:-<NfStatusPageStack StatusPageUrl>}
   ${BOLD}Page login:${RST}   ${PAGE_USER:-admin} / ${PAGE_PASS:-<read from Secrets Manager: nf-devops-agent-statuspage-login>}
   ${BOLD}Agent role:${RST}   ${AGENT_ROLE:-<NfAgentIamStack AgentRoleArn>}
+  ${BOLD}Agent space:${RST}  ${AGENT_SPACE_ARN:-<not deployed - deployAgentSpace=false; onboard the agent space manually>}
   ${BOLD}Webhook fn:${RST}   ${WEBHOOK_FN:-nf-devops-agent-webhook}
   ${BOLD}Webhook secret:${RST} ${WEBHOOK_SECRET:-nf-devops-agent-webhook-credentials}
   ${BOLD}Workload:${RST}     ${INSTANCE_ID:-<NfWorkloadStack WorkloadInstanceId>}
@@ -173,12 +203,7 @@ ${GRN}${BOLD}============================================================${RST}
 ${BOLD}NEXT STEPS${RST}
   1. Open the status page above and sign in with the page login. All three
      scenarios should read green.
-  2. Connect AWS DevOps Agent (manual, one time):
-       - Create an Agent Space and grant it the agent role above.
-       - Configure the DevOps Agent webhook, then open the status page's
-         "Configure webhook" link, paste the webhook URL + signing secret, and
-         save. The page writes them to Secrets Manager for you (no AWS CLI).
-       - Send a test event to the '${WEBHOOK_FN:-nf-devops-agent-webhook}' AWS Lambda function; a 200 confirms the path.
+${AGENT_STEP}
   3. Break / fix a scenario from CloudShell with the published script (no repo needed):
        ${SCRIPT_DL:-aws s3 cp s3://nf-devops-agent-scripts-<account>-<region>/nf-scenario.sh nf-scenario.sh && chmod +x nf-scenario.sh}
        ./nf-scenario.sh activate 1   # break
