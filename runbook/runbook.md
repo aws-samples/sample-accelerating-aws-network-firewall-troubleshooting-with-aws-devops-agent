@@ -7,9 +7,16 @@ AWS APIs and Amazon CloudWatch Logs, the outcome and recommended fix the agent s
 to revert and confirm the environment is healthy again. It closes with the teardown order
 and a post-teardown verification sweep.
 
-Everything below is limited to what the CDK app actually provisions across its eight stacks
-(network, firewall, logging, alarms, agent IAM, workload, webhook, status page). No
+Everything below is limited to what the CDK app actually provisions across its stacks
+(network, test endpoint, firewall, logging, alarms, agent IAM, workload, webhook, status
+page, scenario script, and — on by default — the DevOps Agent agent space). No
 resource, metric, or fix is referenced that the code does not create.
+
+> The `NfAgentSpaceStack` automates the one-time AWS DevOps Agent onboarding (agent
+> space + roles + this-account association) and is deployed by default in AWS DevOps
+> Agent supported Regions. Set `--context deployAgentSpace=false` to skip it and
+> onboard the agent manually. Creating the agent webhook and wiring it to the alarm
+> pipeline remains a manual step in either case.
 
 ## Deployed resource names
 
@@ -176,13 +183,19 @@ AWS Lambda function → the Lambda reads the webhook URL + signing secret from A
 an incident payload, signs it with HMAC SHA-256, and POSTs it to the DevOps Agent webhook
 → the agent validates the signature and starts an investigation.
 
-One-time setup connects the agent to that pipeline:
+One-time setup connects the agent to that pipeline. Steps 1–3 are **automated by
+`NfAgentSpaceStack`** (deployed by default); steps 4–6 (the webhook) remain manual:
 
-1. **Create a DevOps Agent Space.**
-2. **Grant the Space read access to this account.**
-3. **Configure the Space to assume the least-privilege role** from the `AgentRoleArn`
-   output (or set the `devopsAgentPrincipal` context value to the Agent Space principal
-   before deploying so the role trusts it).
+1. **Agent space — automated.** `NfAgentSpaceStack` creates the DevOps Agent Space
+   (`AWS::DevOpsAgent::AgentSpace`) on deploy; its ARN is the `AgentSpaceArn` output.
+2. **Account association — automated.** The same stack creates the AWS "monitor"
+   association linking this account to the agent space.
+3. **Agent-space role — automated.** The stack creates the agent-space service role
+   (AWS-managed `AIDevOpsAgentAccessPolicy`) that the association uses. *(If you set
+   `deployAgentSpace=false` or deployed in a Region without AWS DevOps Agent, perform
+   steps 1–3 manually instead and configure the Space to assume the least-privilege role
+   from the `AgentRoleArn` output, or set the `devopsAgentPrincipal` context value to the
+   Agent Space principal before deploying so that role trusts it.)*
 4. **Configure the DevOps Agent webhook** and download the CSV with the webhook URL and
    signing secret.
 5. **Store the credentials from the status page:**
@@ -445,6 +458,11 @@ order manually; the logical order it follows is:
    CloudFront distribution, Application Load Balancer and its security group, the agent IAM role, the test workload and its
    instance role, the SSM interface endpoints, NAT gateways, the IGW, subnets, route
    tables, and the VPC) are deleted in the order their dependencies allow.
+5. **The DevOps Agent agent space is deleted** (when `NfAgentSpaceStack` was deployed).
+   `NfAgentSpaceStack` is standalone, so `cdk destroy --all` removes its association,
+   agent space, and the two IAM roles independently of the other stacks. **Warning:
+   destroying the agent space permanently deletes it and all associated data
+   (investigations, topology, recommendations); this cannot be undone.**
 
 ### Post-teardown verification sweep
 

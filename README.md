@@ -39,6 +39,7 @@ All defaults live in the `context` block of `cdk.json` and can be overridden wit
 | `probeSecret` | _(generated default)_ | Shared secret the HTTPS probes send to the test endpoint (`X-Probe-Secret` header) as defence in depth on top of the NAT-EIP-scoped security group. |
 | `statusPageAllowedCidr` | `0.0.0.0/0` | CIDR allowed to reach the public status-page ALB on HTTP :80. Defaults to open; for anything beyond a short-lived environment, lock it to a specific IP or range. |
 | `statusPageUsername` | `admin` | Basic-auth username for the status page + webhook-config UI. The password is always generated into AWS Secrets Manager at deploy and printed by `scripts/deploy.sh`. |
+| `deployAgentSpace` | `true` | Whether to deploy `NfAgentSpaceStack`, which automates AWS DevOps Agent onboarding (agent space + roles + this-account association). Set to `false` to skip it and onboard the agent manually. Requires an AWS DevOps Agent [supported Region](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-supported-regions.html); the deploy fails fast otherwise. |
 
 ### Health-check probe targets
 
@@ -54,7 +55,9 @@ The workload runs a health-check daemon that probes one target per scenario and 
 bash scripts/deploy.sh           # prereq check + bootstrap + deploy all stacks (clean baseline)
 ```
 
-`scripts/deploy.sh` checks prerequisites (Node 18+, npm, AWS CLI, credentials), installs dependencies, compiles and tests, bootstraps CDK if needed, deploys all ten stacks at the clean baseline, and prints the outputs and next steps. Re-running it is safe (CDK only changes what drifted). Pass `--skip-tests` to skip the local test run.
+`scripts/deploy.sh` checks prerequisites (Node 18+, npm, AWS CLI, credentials), installs dependencies, compiles and tests, bootstraps CDK if needed, deploys all eleven stacks at the clean baseline, and prints the outputs and next steps. Re-running it is safe (CDK only changes what drifted). Pass `--skip-tests` to skip the local test run.
+
+> The eleventh stack, `NfAgentSpaceStack`, automates the one-time AWS DevOps Agent onboarding (agent space + roles + this-account association) and is deployed by default. It only deploys in a [Region where AWS DevOps Agent is available](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-supported-regions.html); otherwise the deploy fails fast with a message. Set `--context deployAgentSpace=false` to skip it (e.g. to onboard the agent manually). Creating the agent **webhook** and wiring it to the alarm pipeline stays a manual reader step either way.
 
 Then drive the scenarios one at a time (only one scenario can be active at a time). AWS CloudShell is the easiest place to run these. Two options:
 
@@ -96,7 +99,7 @@ npm run lint                     # eslint . --ext .ts
 
 ## What gets deployed
 
-The app provisions ten stacks, wired together by cross-stack references so the deploy and teardown order falls out of the dependency graph:
+The app provisions eleven stacks, wired together by cross-stack references so the deploy and teardown order falls out of the dependency graph:
 
 | Stack | Contents |
 |---|---|
@@ -109,6 +112,7 @@ The app provisions ten stacks, wired together by cross-stack references so the d
 | `NfWebhookStack` | The alarm-pipeline bridge: an AWS Lambda function subscribed to the alarms Amazon SNS topic that reads webhook credentials from AWS Secrets Manager, HMAC-signs an incident payload, and POSTs it to the AWS DevOps Agent webhook. |
 | `NfStatusPageStack` | A public Application Load Balancer that fronts the workload's live status page (green/red per scenario) on HTTP :80. |
 | `NfScenarioScriptStack` | An S3 bucket (`nf-devops-agent-scripts-<account>-<region>`) that the deploy publishes `scripts/nf-scenario.sh` into, so the scenarios can be driven from AWS CloudShell with a fixed `aws s3 cp` command (no repo clone, CDK, or Node). |
+| `NfAgentSpaceStack` | **(Optional, on by default)** Automates the one-time AWS DevOps Agent onboarding: the agent space (`AWS::DevOpsAgent::AgentSpace`) with the operator app, the AWS "monitor" association for this account, and the agent-space service role (AWS-managed `AIDevOpsAgentAccessPolicy` + Resource Explorer service-linked-role permission) and operator-app role. Standalone (no cross-stack references). Gated by `deployAgentSpace` (default `true`) and by AWS DevOps Agent regional availability. The webhook still gets created and wired manually. |
 
 On a successful deploy the app emits these outputs as the observable indication that all resources were created:
 
@@ -120,6 +124,7 @@ On a successful deploy the app emits these outputs as the observable indication 
 - Webhook bridge Lambda name and the `nf-devops-agent-webhook-credentials` secret name
 - Public status-page URL (the `StatusPageUrl` ALB output)
 - The CloudShell scenario-driver download command (`ScenarioScriptDownload`) and its S3 URI (`ScenarioScriptS3Uri`)
+- When `NfAgentSpaceStack` is deployed (default): the agent space ARN (`AgentSpaceArn`) and the agent-space (`AgentSpaceRoleArn`) and operator-app (`AgentSpaceOperatorRoleArn`) role ARNs
 
 ## Live status page
 
@@ -129,10 +134,12 @@ On a successful deploy the app emits these outputs as the observable indication 
 
 ## Wiring AWS DevOps Agent
 
-The alarm pipeline carries a firewall drop to the agent automatically: `DroppedPackets` → Amazon CloudWatch alarm → Amazon SNS → webhook bridge AWS Lambda function (reads AWS Secrets Manager, HMAC-signs, POSTs) → AWS DevOps Agent webhook → investigation. One-time setup connects the agent:
+The alarm pipeline carries a firewall drop to the agent automatically: `DroppedPackets` → Amazon CloudWatch alarm → Amazon SNS → webhook bridge AWS Lambda function (reads AWS Secrets Manager, HMAC-signs, POSTs) → AWS DevOps Agent webhook → investigation.
 
-1. Create a DevOps Agent Space and grant it the role from the `AgentRoleArn` output (or set `devopsAgentPrincipal` before deploying).
-2. Create the agent webhook and download its URL + signing secret.
+The **agent space itself is created for you** by `NfAgentSpaceStack` as part of the deploy (default; see "What gets deployed"), so step 1 below is automated. The remaining steps — creating the agent **webhook** and wiring it to the alarm pipeline — stay manual, matching the accompanying blog post:
+
+1. **(Automated by `NfAgentSpaceStack`.)** The agent space, its service/operator roles, and this account's association are created on deploy. The agent space ARN is the `AgentSpaceArn` output. If you set `deployAgentSpace=false` (or deployed in a Region without AWS DevOps Agent), create the agent space manually instead and grant it the least-privilege role from the `AgentRoleArn` output.
+2. In the agent space, create the agent webhook and download its URL + signing secret.
 3. Open the status page using the `StatusPageUrl` output.
 4. Sign in with the `StatusPageUsername` output and the password from the `StatusPagePasswordSecret` AWS Secrets Manager secret.
 5. Choose **Configure webhook**.
@@ -165,4 +172,4 @@ See `runbook/runbook.md` ("Wiring AWS DevOps Agent to the alarm pipeline") for t
 
 ## Conclusion
 
-This sample provides reproducible AWS Network Firewall incident-response scenarios investigated by AWS DevOps Agent using native AWS APIs only. The workflow is intentionally stand-up-and-tear-down: deploy all ten stacks at a clean baseline, run one break-fix scenario at a time, let the agent investigate and recommend a fix, then destroy the environment the same day to control the AWS Network Firewall and NAT gateway hourly cost. Deploy the sample to experience agent-driven firewall troubleshooting end to end, from a tripped Amazon CloudWatch alarm through to a ready-to-run mitigation.
+This sample provides reproducible AWS Network Firewall incident-response scenarios investigated by AWS DevOps Agent using native AWS APIs only. The workflow is intentionally stand-up-and-tear-down: deploy all eleven stacks at a clean baseline, run one break-fix scenario at a time, let the agent investigate and recommend a fix, then destroy the environment the same day to control the AWS Network Firewall and NAT gateway hourly cost. Deploy the sample to experience agent-driven firewall troubleshooting end to end, from a tripped Amazon CloudWatch alarm through to a ready-to-run mitigation.

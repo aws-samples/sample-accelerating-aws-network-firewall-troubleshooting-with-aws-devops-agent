@@ -40,6 +40,7 @@ import { FirewallStack } from "../lib/firewall-stack";
 import { LoggingStack } from "../lib/logging-stack";
 import { AlarmsStack } from "../lib/alarms-stack";
 import { AgentIamStack } from "../lib/agent-iam-stack";
+import { AgentSpaceStack, DEVOPS_AGENT_SUPPORTED_REGIONS } from "../lib/agent-space-stack";
 import { WebhookStack } from "../lib/webhook-stack";
 import { WorkloadStack } from "../lib/workload-stack";
 import { StatusPageStack } from "../lib/status-page-stack";
@@ -144,6 +145,13 @@ const statusPageAllowedCidr = readStringContext(app, "statusPageAllowedCidr", "0
 // Secrets Manager at deploy and printed by scripts/deploy.sh (there is no
 // plaintext-password override, to keep the password out of the synthesized template).
 const statusPageUsername = readStringContext(app, "statusPageUsername", "admin");
+
+// Whether to automate AWS DevOps Agent onboarding (agent space + roles +
+// account association) as its own isolated stack (NfAgentSpaceStack). Defaults
+// to on so the agent exists as part of the deploy; set `deployAgentSpace=false`
+// to skip it (e.g. when onboarding the agent manually or deploying in a region
+// where AWS DevOps Agent is not yet available).
+const deployAgentSpace = readBooleanContext(app, "deployAgentSpace", true);
 
 const env: cdk.Environment = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -268,6 +276,26 @@ cdk.Tags.of(app).add(PROJECT_TAG_KEY, PROJECT_TAG_VALUE);
 //    cross-stack references, so it deploys in parallel with the rest.
 const scenarioScript = new ScenarioScriptStack(app, "NfScenarioScriptStack", { env });
 
+// 10. Agent space — automates the one-time AWS DevOps Agent onboarding (agent
+//     space + service/operator roles + this-account association). Standalone (no
+//     cross-stack references), so it deploys in parallel and tears down cleanly.
+//     Creating the webhook and wiring it to the alarm pipeline stays a manual
+//     reader step; this only guarantees the agent space exists as part of the
+//     deploy. Gated by `deployAgentSpace` (default on) and by the DevOps Agent
+//     regional availability guard below.
+let agentSpace: AgentSpaceStack | undefined;
+if (deployAgentSpace) {
+  if (!DEVOPS_AGENT_SUPPORTED_REGIONS.includes(awsRegion)) {
+    throw new Error(
+      `AWS DevOps Agent is not available in region '${awsRegion}'. ` +
+        `Deploy in one of: ${DEVOPS_AGENT_SUPPORTED_REGIONS.join(", ")}, ` +
+        `or set '--context deployAgentSpace=false' to skip NfAgentSpaceStack ` +
+        `(and onboard the agent manually).`,
+    );
+  }
+  agentSpace = new AgentSpaceStack(app, "NfAgentSpaceStack", { env });
+}
+
 // ── Deploy success indicators (R1.4). Each CfnOutput is scoped to the stack ──
 // that owns the underlying resource.
 
@@ -370,6 +398,23 @@ new cdk.CfnOutput(scenarioScript, "ScenarioScriptDownload", {
   value: scenarioScript.downloadCommand,
   description: "Copy-paste command to fetch the scenario driver in AWS CloudShell",
 });
+
+// Agent-space stack outputs (only when NfAgentSpaceStack is deployed): the agent
+// space ARN plus the service/operator role ARNs the DevOps Agent onboarding uses.
+if (agentSpace) {
+  new cdk.CfnOutput(agentSpace, "AgentSpaceArn", {
+    value: agentSpace.agentSpaceArn,
+    description: "AWS DevOps Agent agent space ARN (created by NfAgentSpaceStack)",
+  });
+  new cdk.CfnOutput(agentSpace, "AgentSpaceRoleArn", {
+    value: agentSpace.agentSpaceRoleArn,
+    description: "AWS DevOps Agent agent-space service role ARN",
+  });
+  new cdk.CfnOutput(agentSpace, "AgentSpaceOperatorRoleArn", {
+    value: agentSpace.operatorRoleArn,
+    description: "AWS DevOps Agent operator-app role ARN",
+  });
+}
 
 // Test-endpoint stack outputs: the generated NLB DNS names the scenarios probe.
 new cdk.CfnOutput(testEndpoint, "AppEndpointDnsOut", {
