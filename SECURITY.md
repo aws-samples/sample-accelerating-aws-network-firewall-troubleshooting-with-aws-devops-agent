@@ -101,6 +101,33 @@ not resource-scopable. They are the minimal viable scope:
   `Describe*` actions are scoped to the specific firewall, policy, and rule-group
   ARNs.
 
+## Known dependency advisories
+
+Dependency vulnerabilities are tracked with GitHub Dependabot and, where
+possible, remediated through the `overrides` block in `package.json` (which pins
+transitive dependencies to patched versions). At the time of writing, the
+following advisory remains open and is **accepted** as a low-risk, build-time-only
+item rather than remediated in this repository:
+
+- **`brace-expansion` ReDoS ([GHSA-3jxr-9vmj-r5cp](https://github.com/advisories/GHSA-3jxr-9vmj-r5cp), high).**
+  A copy of `brace-expansion` `5.0.6` (patched in `5.0.7`) is a **bundled
+  dependency inside `aws-cdk-lib`** (aws-cdk-lib ships its dependency tree
+  pre-packed in its own package tarball). npm `overrides` cannot rewrite a
+  package's bundled dependencies, so this copy cannot be pinned from this
+  project's `package.json`, and the latest `aws-cdk-lib` release still bundles
+  `5.0.6`. The `overrides` here already pin every *non-bundled* copy of
+  `brace-expansion` (and `js-yaml`) to patched versions.
+  - **Why the exposure is negligible:** the vulnerability is a
+    regular-expression denial of service triggered only by maliciously crafted
+    brace/glob input. Within `aws-cdk-lib` this code runs on the `cdk synth` /
+    `cdk deploy` path (path and pattern matching), i.e. at **build time on a
+    trusted developer or CI machine, over your own CDK source** — there is no
+    attacker-controlled input and nothing in the *deployed* sample runtime
+    exercises it.
+  - **Resolution path:** it clears automatically once `aws-cdk-lib` publishes a
+    release that bundles `brace-expansion` `5.0.7` or later; bump `aws-cdk-lib`
+    at that point and the alert closes with no code change here.
+
 ## Self-deployed test endpoint for scenario probes
 
 The scenarios demonstrate a real firewall drop, so the probe targets must be
