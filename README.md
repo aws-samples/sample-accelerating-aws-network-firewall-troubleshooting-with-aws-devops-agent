@@ -94,7 +94,7 @@ Every scenario reaches DevOps Agent the same way. A CloudWatch alarm moves to AL
 
 | Alarm | Source | Triggers when |
 |-------|--------|---------------|
-| Alarm-1 | Prebuilt Network Firewall metric | The firewall's dropped-packet count rises above the baseline |
+| Alarm-1 | Native AWS/NetworkFirewall DroppedPackets | The firewall's dropped-packet count rises above the baseline |
 | Alarm-2 | Custom application health metric | The port 9142 (TCP) connectivity check to the test endpoint is being dropped |
 | Alarm-3 | Custom application health metric | The cross Availability Zone connectivity check is being dropped |
 
